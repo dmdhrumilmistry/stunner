@@ -10,9 +10,22 @@ permissions:
   contents: write
 
 jobs:
+  # Create the release once, generating the notes a single time. Asset jobs run
+  # after this and only upload files, so the release body is never regenerated
+  # or duplicated.
+  create-release:
+    name: Create release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+
   # Cross-compiled stunnerd CLI binaries (pure Go, CGO disabled).
   binaries:
     name: stunnerd ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: create-release
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -48,10 +61,10 @@ jobs:
             tar czf "$name.tar.gz" stunnerd
             sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
           fi
-      - name: Attach to release
+      - name: Upload assets
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          tag_name: ${{ github.ref_name }}
           files: |
             core/dist/*.tar.gz
             core/dist/*.zip
@@ -60,6 +73,7 @@ jobs:
   # Desktop c-shared libraries (cgo) built on native runners.
   libraries:
     name: libstunner (${{ matrix.os }})
+    needs: create-release
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -89,18 +103,19 @@ jobs:
           cp "libstunner.${{ matrix.ext }}" libstunner.h dist/
           tar czf "dist/$name.tar.gz" -C dist "libstunner.${{ matrix.ext }}" libstunner.h
           ( cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256" )
-      - name: Attach to release
+      - name: Upload assets
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          tag_name: ${{ github.ref_name }}
           files: |
             core/dist/*.tar.gz
             core/dist/*.sha256
 
   # Android .aar via gomobile (best effort: needs the NDK, so failures here do
-  # not block the rest of the release).
+  # not block the rest of the release). Uses the module-pinned gomobile tool.
   android-aar:
     name: stunnercore.aar (Android)
+    needs: create-release
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -118,16 +133,16 @@ jobs:
         run: sdkmanager "ndk;26.3.11579264"
       - name: Build AAR
         working-directory: core
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/26.3.11579264
+        shell: bash
         run: |
-          go install golang.org/x/mobile/cmd/gomobile@latest
-          gomobile init
-          gomobile bind -target=android -o stunnercore.aar ./mobile
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/26.3.11579264"
+          # gomobile is pinned via the go.mod tool directive (go tool gomobile).
+          go tool gomobile init
+          go tool gomobile bind -target=android -o stunnercore.aar ./mobile
           mkdir -p dist
           mv stunnercore.aar "dist/stunnercore_${GITHUB_REF_NAME}.aar"
-      - name: Attach to release
+      - name: Upload asset
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          tag_name: ${{ github.ref_name }}
           files: core/dist/*.aar

@@ -120,15 +120,17 @@ into the Flutter app.
 
 ### Mobile (gomobile)
 
+gomobile is pinned via a `tool` directive in `core/go.mod`, so it runs through
+`go tool` (no `@latest` install) and `golang.org/x/mobile` stays in the module
+graph (required by `gomobile bind`).
+
 ```bash
-# one-time
-go install golang.org/x/mobile/cmd/gomobile@latest
-gomobile init
+cd core
+go tool gomobile init
 
 # Android (.aar) and iOS (.xcframework) from the mobile binding package
-cd core
-gomobile bind -target=android -o ../app/android/stunnercore.aar ./mobile
-gomobile bind -target=ios     -o ../app/ios/Stunnercore.xcframework ./mobile
+go tool gomobile bind -target=android -o ../app/android/stunnercore.aar ./mobile
+go tool gomobile bind -target=ios     -o ../app/ios/Stunnercore.xcframework ./mobile
 ```
 
 ### Desktop (c-shared)
