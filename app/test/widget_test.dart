@@ -7,7 +7,6 @@ import 'package:stunner/src/ui/chats_screen.dart';
 
 void main() {
   testWidgets('Chats screen renders seeded conversations', (tester) async {
-    // Core is unavailable in tests (no native lib) — the app must still run.
     final core = StunnerCore.open();
     final store = ChatStore();
     await tester.pumpWidget(MaterialApp(home: ChatsScreen(core: core, store: store)));
@@ -17,13 +16,30 @@ void main() {
     expect(find.byIcon(Icons.add_comment_outlined), findsOneWidget);
   });
 
-  testWidgets('New chat can be created', (tester) async {
-    final core = StunnerCore.open();
+  test('Adding a contact and starting a chat', () {
     final store = ChatStore();
-    await tester.pumpWidget(MaterialApp(home: ChatsScreen(core: core, store: store)));
+    final before = store.chats.length;
+    final contact = store.addContact(name: 'Carol');
+    expect(store.contacts.any((c) => c.name == 'Carol'), isTrue);
 
-    expect(store.chats.length, 2);
-    store.addChat('Carol');
-    expect(store.chats.first.name, 'Carol');
+    final chatId = store.startChatWith(contact);
+    expect(store.chats.length, before + 1);
+    expect(store.chatById(chatId).name, 'Carol');
+
+    // Starting again reuses the same chat.
+    expect(store.startChatWith(contact), chatId);
+    expect(store.chats.length, before + 1);
+  });
+
+  test('Delete chat and message', () {
+    final store = ChatStore();
+    final chat = store.chats.first;
+    final msgId = chat.messages.first.id;
+    store.deleteMessage(chat.id, msgId);
+    expect(store.chatById(chat.id).messages.any((m) => m.id == msgId), isFalse);
+
+    final count = store.chats.length;
+    store.deleteChat(chat.id);
+    expect(store.chats.length, count - 1);
   });
 }

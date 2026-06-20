@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/dmdhrumilmistry/stunner/core/pkg/contact"
 	"github.com/dmdhrumilmistry/stunner/core/pkg/messaging"
 	"github.com/dmdhrumilmistry/stunner/core/pkg/settings"
 	"github.com/dmdhrumilmistry/stunner/core/pkg/vault"
@@ -24,6 +25,7 @@ type fileStore struct {
 
 type dbData struct {
 	Settings      *settings.Settings                `json:"settings,omitempty"`
+	Contacts      map[string]contact.Contact        `json:"contacts"`
 	Conversations map[string]messaging.Conversation `json:"conversations"`
 	Messages      map[string][]storedMessage        `json:"messages"`
 	Outbox        []storedMessage                   `json:"outbox"`
@@ -50,6 +52,7 @@ func openFileStore(opts Options) (Store, error) {
 		path: opts.Path,
 		key:  opts.Key,
 		data: dbData{
+			Contacts:      map[string]contact.Contact{},
 			Conversations: map[string]messaging.Conversation{},
 			Messages:      map[string][]storedMessage{},
 			Blobs:         map[string][]byte{},
@@ -173,6 +176,59 @@ func (s *fileStore) LoadBlob(namespace, key string) ([]byte, error) {
 		return nil, errors.New("storage: blob not found")
 	}
 	return append([]byte(nil), v...), nil
+}
+
+// --- contacts ---
+
+func (s *fileStore) SaveContact(c contact.Contact) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.data.Contacts == nil {
+		s.data.Contacts = map[string]contact.Contact{}
+	}
+	s.data.Contacts[c.Handle] = c
+	return s.flush()
+}
+
+func (s *fileStore) Contacts() ([]contact.Contact, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]contact.Contact, 0, len(s.data.Contacts))
+	for _, c := range s.data.Contacts {
+		out = append(out, c)
+	}
+	return out, nil
+}
+
+func (s *fileStore) DeleteContact(handle string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.data.Contacts, handle)
+	return s.flush()
+}
+
+// --- deletes ---
+
+func (s *fileStore) DeleteConversation(convID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.data.Conversations, convID)
+	delete(s.data.Messages, convID)
+	return s.flush()
+}
+
+func (s *fileStore) DeleteMessage(convID, msgID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	msgs := s.data.Messages[convID]
+	kept := msgs[:0]
+	for _, m := range msgs {
+		if m.Envelope.MsgID != msgID {
+			kept = append(kept, m)
+		}
+	}
+	s.data.Messages[convID] = kept
+	return s.flush()
 }
 
 func (s *fileStore) Close() error {

@@ -4,8 +4,9 @@ import '../models/chat.dart';
 import '../services/chat_store.dart';
 import '../services/emoji.dart';
 
-/// A single conversation: messages from [ChatStore], a working composer
-/// (emoji picker, attach, send), and read-receipt ticks on outgoing messages.
+/// A single conversation: messages from [ChatStore], a working composer (emoji
+/// picker, attach, send), read-receipt ticks, and long-press to delete a
+/// message.
 class ConversationScreen extends StatefulWidget {
   const ConversationScreen({super.key, required this.store, required this.chatId});
 
@@ -23,7 +24,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
   @override
   void initState() {
     super.initState();
-    // Opening the conversation marks it read.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       widget.store.markRead(widget.chatId);
     });
@@ -54,6 +54,31 @@ class _ConversationScreenState extends State<ConversationScreen> {
     }
   }
 
+  Future<void> _deleteMessage(Message m) async {
+    final ok = await showModalBottomSheet<bool>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.delete_outline),
+              title: const Text('Delete message'),
+              onTap: () => Navigator.pop(ctx, true),
+            ),
+            ListTile(
+              leading: const Icon(Icons.close),
+              title: const Text('Cancel'),
+              onTap: () => Navigator.pop(ctx, false),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok == true) {
+      widget.store.deleteMessage(widget.chatId, m.id);
+    }
+  }
+
   Future<void> _pickEmoji() async {
     final picked = await showModalBottomSheet<String>(
       context: context,
@@ -77,20 +102,16 @@ class _ConversationScreenState extends State<ConversationScreen> {
     final text = _controller.text;
     if (sel.isValid) {
       _controller.text = text.replaceRange(sel.start, sel.end, picked);
-      _controller.selection =
-          TextSelection.collapsed(offset: sel.start + picked.length);
+      _controller.selection = TextSelection.collapsed(offset: sel.start + picked.length);
     } else {
       _controller.text = text + picked;
-      _controller.selection =
-          TextSelection.collapsed(offset: _controller.text.length);
+      _controller.selection = TextSelection.collapsed(offset: _controller.text.length);
     }
   }
 
   void _attach() {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('File sharing needs a live connection (coming soon).'),
-      ),
+      const SnackBar(content: Text('File sharing needs a live connection (coming soon).')),
     );
   }
 
@@ -117,7 +138,13 @@ class _ConversationScreenState extends State<ConversationScreen> {
                   controller: _scroll,
                   padding: const EdgeInsets.all(12),
                   itemCount: messages.length,
-                  itemBuilder: (context, i) => _Bubble(message: messages[i]),
+                  itemBuilder: (context, i) {
+                    final m = messages[i];
+                    return GestureDetector(
+                      onLongPress: () => _deleteMessage(m),
+                      child: _Bubble(message: m),
+                    );
+                  },
                 );
               },
             ),
@@ -149,13 +176,9 @@ class _Bubble extends StatelessWidget {
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 4),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.78,
-        ),
+        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
         decoration: BoxDecoration(
-          color: message.fromMe
-              ? scheme.primaryContainer
-              : scheme.surfaceContainerHighest,
+          color: message.fromMe ? scheme.primaryContainer : scheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(16),
         ),
         child: Column(
@@ -166,10 +189,7 @@ class _Bubble extends StatelessWidget {
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  _formatTime(message.time),
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
+                Text(_formatTime(message.time), style: Theme.of(context).textTheme.bodySmall),
                 if (message.fromMe) ...[
                   const SizedBox(width: 4),
                   _ReceiptTick(status: message.status),
@@ -183,8 +203,6 @@ class _Bubble extends StatelessWidget {
   }
 }
 
-/// Read-receipt indicator: clock (sending), single check (sent), double check
-/// (delivered), blue double check (read).
 class _ReceiptTick extends StatelessWidget {
   const _ReceiptTick({required this.status});
 
@@ -248,11 +266,7 @@ class _Composer extends StatelessWidget {
               onSubmitted: (_) => onSend(),
             ),
           ),
-          IconButton(
-            tooltip: 'Send',
-            icon: const Icon(Icons.send),
-            onPressed: onSend,
-          ),
+          IconButton(tooltip: 'Send', icon: const Icon(Icons.send), onPressed: onSend),
         ],
       ),
     );

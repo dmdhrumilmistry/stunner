@@ -10,6 +10,7 @@
 package storage
 
 import (
+	"github.com/dmdhrumilmistry/stunner/core/pkg/contact"
 	"github.com/dmdhrumilmistry/stunner/core/pkg/messaging"
 	"github.com/dmdhrumilmistry/stunner/core/pkg/settings"
 )
@@ -20,11 +21,18 @@ type Store interface {
 	LoadSettings() (settings.Settings, error)
 	SaveSettings(s settings.Settings) error
 
+	// Contacts.
+	SaveContact(c contact.Contact) error
+	Contacts() ([]contact.Contact, error)
+	DeleteContact(handle string) error
+
 	// Conversations & messages.
 	Conversations() ([]messaging.Conversation, error)
 	UpsertConversation(c messaging.Conversation) error
+	DeleteConversation(convID string) error
 	AppendMessage(convID string, env messaging.Envelope, state messaging.DeliveryState) error
 	Messages(convID string, limit, offset int) ([]messaging.Envelope, error)
+	DeleteMessage(convID, msgID string) error
 
 	// Outbox for pure-P2P retry (offline-delivery tradeoff).
 	EnqueueOutbox(convID string, env messaging.Envelope) error
