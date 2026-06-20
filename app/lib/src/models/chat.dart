@@ -1,23 +1,46 @@
 // UI-side models. These mirror parts of the Go core's messaging/contact model
 // (core/pkg/messaging, core/pkg/contact) and are driven by ChatStore.
 
+/// Computes up-to-two-letter initials from a display name.
+String initialsOf(String name) {
+  final parts = name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+  if (parts.isEmpty) return '?';
+  if (parts.length == 1) return parts.first[0].toUpperCase();
+  return (parts.first[0] + parts.last[0]).toUpperCase();
+}
+
 /// Delivery state of an outgoing message, mirroring messaging.DeliveryState.
 enum DeliveryStatus { sending, sent, delivered, read }
 
 /// A person you can message. `code` is their `stunner:contact` URI (from a QR
-/// code); `fingerprint` is derived from it for verification.
+/// code); `fingerprint` is derived from it for verification. The remaining
+/// fields back the contact-profile screen.
 class Contact {
   Contact({
     required this.id,
     required this.name,
     this.code = '',
     this.fingerprint = '',
+    this.role = '',
+    this.email = '',
+    this.phone = '',
+    this.online = false,
+    this.muted = false,
+    this.blocked = false,
   });
 
   final String id;
   String name;
   final String code;
   final String fingerprint;
+  String role;
+  String email;
+  String phone;
+  bool online;
+  bool muted;
+  bool blocked;
+
+  String get initials => initialsOf(name);
 }
 
 class Message {
@@ -27,7 +50,9 @@ class Message {
     required this.fromMe,
     DateTime? time,
     this.status = DeliveryStatus.sent,
-  }) : time = time ?? DateTime.now();
+    Map<String, int>? reactions,
+  })  : time = time ?? DateTime.now(),
+        reactions = reactions ?? {};
 
   final String id;
   final String text;
@@ -36,6 +61,9 @@ class Message {
 
   /// Delivery status (only meaningful for outgoing messages).
   DeliveryStatus status;
+
+  /// Emoji -> count. A simple in-session reaction model.
+  final Map<String, int> reactions;
 }
 
 class Chat {
