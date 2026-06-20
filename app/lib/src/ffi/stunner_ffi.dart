@@ -22,6 +22,15 @@ typedef _PingDart = Pointer<Utf8> Function(Pointer<Utf8>);
 typedef _FingerprintC = Pointer<Utf8> Function();
 typedef _FingerprintDart = Pointer<Utf8> Function();
 
+typedef _ContactURIC = Pointer<Utf8> Function(Pointer<Utf8>);
+typedef _ContactURIDart = Pointer<Utf8> Function(Pointer<Utf8>);
+
+typedef _SafetyC = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>);
+typedef _SafetyDart = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>);
+
+typedef _ValidateC = Pointer<Utf8> Function(Pointer<Utf8>);
+typedef _ValidateDart = Pointer<Utf8> Function(Pointer<Utf8>);
+
 typedef _FreeC = Void Function(Pointer<Utf8>);
 typedef _FreeDart = void Function(Pointer<Utf8>);
 
@@ -44,6 +53,12 @@ class StunnerCore {
   late final _FingerprintDart _fingerprint = _lib!
       .lookupFunction<_FingerprintC, _FingerprintDart>(
           'StunnerNewIdentityFingerprint');
+  late final _ContactURIDart _contactURI = _lib!
+      .lookupFunction<_ContactURIC, _ContactURIDart>('StunnerNewContactURI');
+  late final _SafetyDart _safety =
+      _lib!.lookupFunction<_SafetyC, _SafetyDart>('StunnerSafetyNumber');
+  late final _ValidateDart _validate = _lib!
+      .lookupFunction<_ValidateC, _ValidateDart>('StunnerValidateContactURI');
   late final _FreeDart _free =
       _lib!.lookupFunction<_FreeC, _FreeDart>('StunnerFree');
 
@@ -92,5 +107,57 @@ class StunnerCore {
     final s = ptr.toDartString();
     _free(ptr);
     return s;
+  }
+
+  /// Generates a fresh identity and returns its shareable `stunner:contact` URI
+  /// (render this as a QR code). Ephemeral until the persistent account is
+  /// exposed over FFI.
+  String newContactURI(String handle) {
+    if (!available) return 'stunner:contact?n=$handle';
+    final arg = handle.toNativeUtf8();
+    try {
+      final ptr = _contactURI(arg);
+      final s = ptr.toDartString();
+      _free(ptr);
+      return s;
+    } finally {
+      malloc.free(arg);
+    }
+  }
+
+  /// Computes the verification safety number between two contacts, each given as
+  /// a `stunner:contact` URI (e.g. your own and one scanned from a QR code).
+  String safetyNumber(String myContactURI, String peerContactURI) {
+    if (!available) return 'core unavailable';
+    final a = myContactURI.toNativeUtf8();
+    final b = peerContactURI.toNativeUtf8();
+    try {
+      final ptr = _safety(a, b);
+      final s = ptr.toDartString();
+      _free(ptr);
+      return s;
+    } finally {
+      malloc.free(a);
+      malloc.free(b);
+    }
+  }
+
+  /// Validates a scanned contact URI, returning (handle, fingerprint) or
+  /// throwing if the core reports an error.
+  ({String handle, String fingerprint}) validateContactURI(String uri) {
+    if (!available) return (handle: '', fingerprint: 'core unavailable');
+    final arg = uri.toNativeUtf8();
+    try {
+      final ptr = _validate(arg);
+      final s = ptr.toDartString();
+      _free(ptr);
+      if (s.startsWith('error: ')) {
+        throw FormatException(s.substring(7));
+      }
+      final parts = s.split('\t');
+      return (handle: parts.first, fingerprint: parts.length > 1 ? parts[1] : '');
+    } finally {
+      malloc.free(arg);
+    }
   }
 }

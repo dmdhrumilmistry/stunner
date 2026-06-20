@@ -46,6 +46,34 @@ func StunnerNewIdentityFingerprint() *C.char {
 	return C.CString(fp)
 }
 
+//export StunnerNewContactURI
+func StunnerNewContactURI(handle *C.char) *C.char {
+	uri, err := core.NewContactURI(C.GoString(handle))
+	if err != nil {
+		return C.CString("error: " + err.Error())
+	}
+	return C.CString(uri)
+}
+
+//export StunnerSafetyNumber
+func StunnerSafetyNumber(myContactURI, peerContactURI *C.char) *C.char {
+	sn, err := core.SafetyNumber(C.GoString(myContactURI), C.GoString(peerContactURI))
+	if err != nil {
+		return C.CString("error: " + err.Error())
+	}
+	return C.CString(sn)
+}
+
+//export StunnerValidateContactURI
+func StunnerValidateContactURI(uri *C.char) *C.char {
+	handle, fp, err := core.ValidateContactURI(C.GoString(uri))
+	if err != nil {
+		return C.CString("error: " + err.Error())
+	}
+	// Returns "handle\tfingerprint"; the Dart side splits on the tab.
+	return C.CString(handle + "\t" + fp)
+}
+
 //export StunnerFree
 func StunnerFree(p *C.char) {
 	C.free(unsafe.Pointer(p))

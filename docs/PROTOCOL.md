@@ -13,6 +13,15 @@ marked _TBD_.
   grouped for display. Used in QR codes and safety numbers.
 - **Discovery key:** `SHA-256(identityPubKey || rendezvousSalt)` — what a peer
   advertises/looks up in the DHT, so the raw identity key is not the lookup key.
+- **Contact URI:** `stunner:contact?k=<base64url(identityPubKey)>&n=<handle>` —
+  encoded into a QR code for contact exchange (`pkg/contact`).
+- **Safety number:** Signal-style 60-digit number derived from both parties'
+  identity keys (`pkg/safetynumber`); identical on both devices, compared out of
+  band to detect MITM.
+
+> Implementation note: the reference core encodes envelopes and frames as JSON
+> (see below); `pkg/messaging.Frame` carries the optional X3DH handshake on the
+> first message plus the ratchet ciphertext. Status per phase: `docs/ROADMAP.md`.
 
 ## 2. Layers
 

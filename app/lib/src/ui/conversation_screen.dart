@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/chat.dart';
+import '../services/emoji.dart';
 
 /// A single conversation view with a message composer.
 ///
@@ -30,13 +31,14 @@ class _ConversationScreenState extends State<ConversationScreen> {
   }
 
   void _send() {
-    final text = _controller.text.trim();
+    final text = expandShortcodes(_controller.text.trim());
     if (text.isEmpty) return;
     setState(() {
       _messages.add(Message(id: 'local-${_messages.length}', text: text, fromMe: true));
       _controller.clear();
     });
-    // TODO(roadmap phase 4): core.sendText(widget.chat.id, text) over FFI.
+    // TODO: deliver via the core's node/link (core.sendText over FFI) once the
+    // stateful runtime is exposed across the boundary.
   }
 
   @override

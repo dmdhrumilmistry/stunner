@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../ffi/stunner_ffi.dart';
+import 'my_identity_screen.dart';
 
 /// Settings: STUN/TURN override, optional relay, app lock, and a diagnostics
 /// section that exercises the Go core over FFI.
@@ -16,7 +17,6 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _relayEnabled = false;
   String _appLock = 'none';
-  String? _fingerprint;
 
   @override
   Widget build(BuildContext context) {
@@ -63,10 +63,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           ListTile(
             leading: const Icon(Icons.qr_code_2),
-            title: const Text('My safety number'),
-            subtitle: Text(_fingerprint ?? 'Tap to generate (FFI smoke test)'),
-            onTap: () => setState(
-              () => _fingerprint = widget.core.newIdentityFingerprint(),
+            title: const Text('My identity & safety number'),
+            subtitle: const Text('Show your QR code and verify a contact'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => MyIdentityScreen(core: widget.core),
+              ),
             ),
           ),
           const Divider(),
