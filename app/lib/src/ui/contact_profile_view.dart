@@ -154,7 +154,7 @@ class ContactProfileView extends StatelessWidget {
                           if (contact.email.isEmpty &&
                               contact.phone.isEmpty &&
                               contact.fingerprint.isEmpty)
-                            _DetailRow(
+                            const _DetailRow(
                               icon: Icons.lock_outline,
                               label: 'Encryption',
                               value: 'End-to-end encrypted',

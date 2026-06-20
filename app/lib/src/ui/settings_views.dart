@@ -373,8 +373,8 @@ class _NetworkViewState extends State<NetworkView> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _IceLine('stun:stun.l.google.com:19302'),
-              _IceLine('stun:stun1.l.google.com:19302'),
+              const _IceLine('stun:stun.l.google.com:19302'),
+              const _IceLine('stun:stun1.l.google.com:19302'),
               const SizedBox(height: 8),
               Text(
                 'Pure P2P uses STUN only for discovery; no message data passes '
