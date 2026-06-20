@@ -30,10 +30,14 @@ Run the whole pipeline end-to-end: `cd core && go run ./cmd/stunnerd`.
 Pushing a tag matching `v*` triggers `.github/workflows/release.yml`, which
 builds and attaches to a GitHub Release:
 
+- the **Stunner app** with the Go core bundled in: Android `.apk` and desktop
+  bundles for Linux/Windows/macOS (best-effort),
 - `stunnerd` CLI binaries for linux/darwin/windows × amd64/arm64 (tar.gz/zip +
   SHA-256 checksums),
 - desktop `libstunner` c-shared libraries (`.so`/`.dylib`/`.dll`) with headers,
 - the Android `stunnercore.aar` (gomobile, best-effort).
+
+See the [README](../README.md#install--use-the-app) for install/usage steps.
 
 ```bash
 git tag v0.3.0 && git push origin v0.3.0

@@ -175,6 +175,60 @@ flutter analyze
 flutter test
 ```
 
+## Install & use the app
+
+Each tagged release (see [Releases](https://github.com/dmdhrumilmistry/stunner/releases))
+attaches the **Stunner app** with the Go core bundled in, alongside the
+`stunnerd` CLI and libraries:
+
+- `stunner_<version>_android.apk` — Android app
+- `stunner_<version>_linux.tar.gz` — Linux desktop app
+- `stunner_<version>_windows.zip` — Windows desktop app
+- `stunner_<version>_macos.tar.gz` — macOS desktop app
+
+### Android
+
+1. Download `stunner_<version>_android.apk` from the release.
+2. On your phone, enable **Install unknown apps** for your browser/file manager.
+3. Open the APK to install, then launch **Stunner**.
+
+> The APK is signed with a debug key (for sideloading/testing, not the Play
+> Store). Open **Settings → My identity & safety number** to see your QR code and
+> verify a contact.
+
+### Desktop
+
+- **Linux:** `tar xzf stunner_<version>_linux.tar.gz && ./stunner` (the bundled
+  `lib/libstunner.so` is loaded automatically).
+- **Windows:** unzip and run `stunner.exe` (`stunner.dll` sits beside it).
+- **macOS:** extract and open `stunner.app`. It is unsigned, so first launch
+  needs **right-click → Open** (or *System Settings → Privacy & Security →
+  Open Anyway*).
+
+### Run from source
+
+No release needed — build the core and run the app directly:
+
+```bash
+# 1) build the Go core as a native library next to the app
+cd core
+go build -buildmode=c-shared -o ../app/libstunner.so ./ffi      # .dylib / stunner.dll on macOS / Windows
+
+# 2) run the Flutter app (desktop or a connected device)
+cd ../app
+flutter pub get
+flutter run
+```
+
+The app loads the core via `dart:ffi`; if the library isn't found it still runs
+in a degraded mode (UI works, core-backed features show "core unavailable").
+
+> Two devices talking to each other needs the production transport/signaling
+> (`pion/webrtc` + libp2p DHT) wired into the app's runtime over FFI — that
+> binding is the next integration step (see [`docs/ROADMAP.md`](docs/ROADMAP.md)).
+> Today the app exercises the core locally (identity, QR, safety numbers); the
+> full two-device message path is covered by the Go tests and `stunnerd`.
+
 ## Contributing
 
 Contributions welcome. Please read [`SECURITY.md`](SECURITY.md) before reporting

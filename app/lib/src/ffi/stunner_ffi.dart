@@ -73,11 +73,39 @@ class StunnerCore {
   }
 
   static DynamicLibrary _load() {
-    if (Platform.isMacOS) return DynamicLibrary.open('libstunner.dylib');
-    if (Platform.isWindows) return DynamicLibrary.open('stunner.dll');
-    if (Platform.isLinux) return DynamicLibrary.open('libstunner.so');
-    // On Android/iOS the core is statically linked via gomobile (later phase).
-    return DynamicLibrary.process();
+    // Android: the core is bundled as jniLibs/<abi>/libstunner.so and resolved
+    // by name. iOS would require static linking (not yet wired).
+    if (Platform.isAndroid) return DynamicLibrary.open('libstunner.so');
+    if (Platform.isIOS) return DynamicLibrary.process();
+
+    // Desktop: try paths relative to the executable / app bundle first (where
+    // the release packages the library), then fall back to the bare name.
+    final exeDir = File(Platform.resolvedExecutable).parent.path;
+    final sep = Platform.pathSeparator;
+    final candidates = <String>[];
+    if (Platform.isWindows) {
+      candidates.addAll(['$exeDir${sep}stunner.dll', 'stunner.dll']);
+    } else if (Platform.isMacOS) {
+      candidates.addAll([
+        '$exeDir$sep..${sep}Frameworks${sep}libstunner.dylib',
+        '$exeDir${sep}libstunner.dylib',
+        'libstunner.dylib',
+      ]);
+    } else {
+      candidates.addAll([
+        '$exeDir${sep}lib${sep}libstunner.so',
+        '$exeDir${sep}libstunner.so',
+        'libstunner.so',
+      ]);
+    }
+    for (final path in candidates) {
+      try {
+        return DynamicLibrary.open(path);
+      } on Object {
+        // try next candidate
+      }
+    }
+    throw Exception('libstunner not found (looked in: ${candidates.join(", ")})');
   }
 
   String version() {

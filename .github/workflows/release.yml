@@ -146,3 +146,149 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           files: core/dist/*.aar
+
+  # The Stunner app for Android (.apk) with the Go core bundled as jniLibs so
+  # the app is functional (not degraded). Best-effort: needs NDK + Flutter.
+  app-android:
+    name: Stunner app (Android APK)
+    needs: create-release
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: core/go.sum
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - name: Install NDK
+        run: sdkmanager "ndk;26.3.11579264"
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Generate Android project
+        working-directory: app
+        run: flutter create --platforms=android .
+      - name: Build Go core for Android ABIs (jniLibs)
+        shell: bash
+        run: |
+          NDK="$ANDROID_HOME/ndk/26.3.11579264"
+          TC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          jni="app/android/app/src/main/jniLibs"
+          build() { # $1=abi $2=cc $3=goarch $4=goarm
+            mkdir -p "$jni/$1"
+            (cd core && CGO_ENABLED=1 GOOS=android GOARCH="$3" GOARM="$4" CC="$TC/$2" \
+              go build -buildmode=c-shared -o "../$jni/$1/libstunner.so" ./ffi)
+          }
+          build arm64-v8a   aarch64-linux-android21-clang    arm64 ""
+          build armeabi-v7a armv7a-linux-androideabi21-clang arm   7
+          build x86_64      x86_64-linux-android21-clang      amd64 ""
+      - name: Build APK
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build apk --release
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist
+          apk=app/build/app/outputs/flutter-apk/app-release.apk
+          name="stunner_${GITHUB_REF_NAME}_android.apk"
+          cp "$apk" "dist/$name"
+          ( cd dist && sha256sum "$name" > "$name.sha256" )
+      - name: Upload asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            dist/*.apk
+            dist/*.sha256
+
+  # The Stunner app for desktop (Linux/Windows/macOS) with the Go core c-shared
+  # library bundled next to the executable. Best-effort.
+  app-desktop:
+    name: Stunner app (${{ matrix.platform }})
+    needs: create-release
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, platform: linux }
+          - { os: windows-latest, platform: windows }
+          - { os: macos-latest, platform: macos }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: core/go.sum
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Linux build dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
+      - name: Generate desktop project
+        working-directory: app
+        shell: bash
+        run: flutter create --platforms=${{ matrix.platform }} .
+      - name: Build Go core (c-shared)
+        working-directory: core
+        shell: bash
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          case "${{ matrix.platform }}" in
+            linux)   go build -buildmode=c-shared -o libstunner.so   ./ffi ;;
+            windows) go build -buildmode=c-shared -o stunner.dll     ./ffi ;;
+            macos)   go build -buildmode=c-shared -o libstunner.dylib ./ffi ;;
+          esac
+      - name: Build app
+        working-directory: app
+        shell: bash
+        run: |
+          flutter pub get
+          flutter build ${{ matrix.platform }} --release
+      - name: Package (Linux/macOS)
+        if: matrix.platform != 'windows'
+        shell: bash
+        run: |
+          mkdir -p dist
+          name="stunner_${GITHUB_REF_NAME}_${{ matrix.platform }}"
+          if [ "${{ matrix.platform }}" = linux ]; then
+            b=app/build/linux/x64/release/bundle
+            cp core/libstunner.so "$b/lib/"
+            tar czf "dist/$name.tar.gz" -C "$b" .
+          else
+            appdir=$(ls -d app/build/macos/Build/Products/Release/*.app | head -1)
+            mkdir -p "$appdir/Contents/Frameworks"
+            cp core/libstunner.dylib "$appdir/Contents/Frameworks/"
+            tar czf "dist/$name.tar.gz" -C "$(dirname "$appdir")" "$(basename "$appdir")"
+          fi
+          ( cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256" )
+      - name: Package (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $b = "app/build/windows/x64/runner/Release"
+          Copy-Item core/stunner.dll $b
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $name = "stunner_${env:GITHUB_REF_NAME}_windows"
+          Compress-Archive -Path "$b/*" -DestinationPath "dist/$name.zip"
+          (Get-FileHash "dist/$name.zip" -Algorithm SHA256).Hash.ToLower() + "  $name.zip" | Out-File -Encoding ascii "dist/$name.zip.sha256"
+      - name: Upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.sha256
