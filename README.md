@@ -9,17 +9,24 @@ cryptography live in a single **Go core**; the UI is a **Flutter** app that
 calls the core over FFI. Messages travel **directly between devices** over
 encrypted WebRTC data channels — there is no central message server.
 
-> ⚠️ **Status: working reference core.** The full pipeline — X3DH + Double
-> Ratchet E2E encryption, messaging, chunked file transfer, encrypted-at-rest
-> storage, safety-number verification, and an optional offline mailbox — is
-> implemented and unit-tested in Go (standard library only) and runs end-to-end
-> in-process (`cd core && go run ./cmd/stunnerd`). What remains is swapping the
-> in-process/reference backends for production ones (pion/webrtc, libp2p,
-> SQLCipher) behind the same interfaces. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+> ⚠️ **Status: working core with production backends.** The full pipeline —
+> Signal-protocol E2E encryption, messaging, chunked file transfer,
+> encrypted-at-rest storage, safety-number verification, and an optional offline
+> mailbox — is implemented and unit-tested, and runs end-to-end in-process
+> (`cd core && go run ./cmd/stunnerd`). Each networked concern has both an
+> in-process reference backend and a production backend wired in behind the same
+> interface: **`pion/webrtc`** transport over STUN/TURN, a **libp2p** Kademlia
+> DHT signaler, and a **`go.mau.fi/libsignal`** crypto backend. See
+> [`docs/ROADMAP.md`](docs/ROADMAP.md).
 >
-> 🔒 **Crypto not yet audited.** The X3DH/Double Ratchet composition is built
-> from vetted stdlib primitives but must receive an independent review before
-> production use — see [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
+> 🔒 **Crypto:** use the `pkg/crypto/libsignal` (maintained Signal library)
+> backend for production. The from-scratch X3DH/Double Ratchet in `pkg/crypto` is
+> built on vetted stdlib primitives but is **not independently audited** — see
+> [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
+>
+> 📦 **Releases:** push a `v*` tag to build cross-platform `stunnerd` binaries,
+> desktop `libstunner` libraries, and the Android `.aar`, attached to a GitHub
+> Release (`.github/workflows/release.yml`).
 
 ## Why "Stunner"
 

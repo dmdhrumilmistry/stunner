@@ -1,18 +1,12 @@
-// Package filetransfer implements chunked, resumable, integrity-checked file
-// transfer over a secure session.
+// Package filetransfer implements chunked, integrity-checked file transfer over
+// a secure session.
 //
-// A sender emits a FileOffer (name, size, chunk size, SHA-256 of the plaintext,
-// and a per-transfer key carried inside the E2E session). Each FileChunk is
-// sealed with an AEAD (pkg/crypto.SealFile) and sent over the data channel.
-// Missing chunks can be re-requested, enabling resume. See docs/PROTOCOL.md §5.
-//
-// This file defines the model and interfaces; implemented in roadmap phase 6.
+// A sender produces a FileOffer (name, size, chunk size, SHA-256 of the
+// plaintext, and a per-transfer key carried inside the E2E session) plus a set
+// of FileChunks, each sealed with an AEAD (pkg/crypto.SealFile). Chunks may
+// arrive out of order and are reassembled and integrity-checked. See
+// Split/Reassemble in impl.go and docs/PROTOCOL.md §5.
 package filetransfer
-
-import "errors"
-
-// ErrNotImplemented marks skeleton stubs awaiting a roadmap phase.
-var ErrNotImplemented = errors.New("filetransfer: not implemented (see docs/ROADMAP.md phase 6)")
 
 // DefaultChunkSize is the default plaintext chunk size before AEAD sealing.
 const DefaultChunkSize = 16 * 1024 // 16 KiB
@@ -35,24 +29,11 @@ type Chunk struct {
 	Data   []byte `json:"data"` // AEAD-sealed
 }
 
-// Progress reports transfer progress to the UI.
+// Progress reports transfer progress to the UI as chunks are sent/received.
 type Progress struct {
 	FileID     string
 	BytesDone  uint64
 	BytesTotal uint64
 	Done       bool
 	Err        error
-}
-
-// Sender drives an outgoing transfer.
-type Sender interface {
-	// Start begins sending the file at path to peerID, reporting progress.
-	Start(peerID, path string, report func(Progress)) (Offer, error)
-}
-
-// Receiver drives an incoming transfer.
-type Receiver interface {
-	// Accept stores an offered file to destPath, verifying integrity on
-	// completion. Declining is handled via a CONTROL message.
-	Accept(offer Offer, destPath string, report func(Progress)) error
 }

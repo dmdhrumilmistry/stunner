@@ -5,25 +5,39 @@ buildable and reviewable.
 
 ## Status
 
-Phases 1–8 are implemented as a **stdlib-only reference core** whose entire
-pipeline runs and is unit-tested in-process. What remains is swapping the
-in-process/reference backends for production ones behind the same interfaces:
+Phases 1–8 are implemented, with both a **stdlib reference backend** (carrying
+the core logic, runnable/testable in-process) and a **production backend** wired
+in behind the same interface for each networked concern:
 
-| Concern | Implemented now (stdlib) | Production backend (pending) |
+| Concern | Reference backend (default, in-process) | Production backend (wired in) |
 |---|---|---|
-| E2E crypto | from-scratch X3DH + Double Ratchet (`pkg/crypto`) | optionally `go.mau.fi/libsignal`; **needs audit** |
-| Transport | in-process pipe (`transport.Pipe`) | `pion/webrtc` data channels over STUN/TURN |
-| Signaling | in-memory registry (`signaling.Registry`) | libp2p Kademlia DHT |
-| Storage | vault-sealed JSON file (`storage` file store) | SQLCipher |
-| Offline relay | in-memory mailbox (`pkg/mailbox`) | networked self-hostable relay |
-| Mobile FFI | gomobile-ready surface | `gomobile bind` artifacts + stateful runtime binding |
+| E2E crypto | from-scratch X3DH + Double Ratchet (`pkg/crypto`) | `go.mau.fi/libsignal` (`pkg/crypto/libsignal`) ✅ |
+| Transport | in-process pipe (`transport.Pipe`) | `pion/webrtc` data channels over STUN/TURN (`transport.New`) ✅ |
+| Signaling | in-memory registry (`signaling.Registry`) | libp2p Kademlia DHT (`signaling.NewDHT`) ✅ |
+| Storage | vault-sealed file store (`storage.Open`) | SQLCipher (future swap behind `storage.Store`) |
+| Offline relay | in-memory mailbox (`pkg/mailbox`) | networked self-hostable relay (future) |
+| Mobile FFI | gomobile-ready surface | `gomobile bind` artifacts (built in release CI) |
 
-> ⚠️ **Crypto audit required.** The X3DH/Double Ratchet composition is a
-> from-scratch implementation over vetted stdlib primitives (AES-GCM,
-> HMAC-SHA256, SHA-512, X25519). It must receive an independent review before any
-> production use. See `docs/THREAT_MODEL.md`.
+> ⚠️ **Crypto audit.** The from-scratch X3DH/Double Ratchet in `pkg/crypto` is
+> built on vetted stdlib primitives but is **not independently audited** — use
+> the `pkg/crypto/libsignal` backend (maintained Signal implementation) for
+> production, or commission an audit. See `docs/THREAT_MODEL.md`.
 
 Run the whole pipeline end-to-end: `cd core && go run ./cmd/stunnerd`.
+
+## Releases
+
+Pushing a tag matching `v*` triggers `.github/workflows/release.yml`, which
+builds and attaches to a GitHub Release:
+
+- `stunnerd` CLI binaries for linux/darwin/windows × amd64/arm64 (tar.gz/zip +
+  SHA-256 checksums),
+- desktop `libstunner` c-shared libraries (`.so`/`.dylib`/`.dll`) with headers,
+- the Android `stunnercore.aar` (gomobile, best-effort).
+
+```bash
+git tag v0.3.0 && git push origin v0.3.0
+```
 
 ## Phase 1 — Skeleton ✅
 
@@ -49,18 +63,22 @@ Run the whole pipeline end-to-end: `cd core && go run ./cmd/stunnerd`.
 
 ## Phase 3 — Secure sessions (Signal) ✅
 
-- X3DH handshake + Double Ratchet (`pkg/crypto`): forward secrecy, out-of-order
-  delivery, skipped-key handling, AEAD-bound headers and identity binding.
-- Prekey generation/bundles; in-memory session store.
-- _Pending:_ optional swap to `go.mau.fi/libsignal`; **independent audit**.
+- From-scratch X3DH + Double Ratchet (`pkg/crypto`): forward secrecy,
+  out-of-order delivery, skipped-key handling, AEAD-bound headers, identity
+  binding.
+- Production: `go.mau.fi/libsignal` backend (`pkg/crypto/libsignal`) implementing
+  the same `crypto.Session` interface ✅ — recommended for production pending an
+  audit of the from-scratch path.
 
-## Phase 4 — Transport & signaling ✅ (reference)
+## Phase 4 — Transport & signaling ✅
 
-- `Signaler` interface + in-memory `signaling.Registry` (discovery, SDP/ICE,
-  presence); in-process `transport.Pipe` data channel.
+- `Signaler`/`Transport` interfaces with in-process reference backends
+  (`signaling.Registry`, `transport.Pipe`).
+- Production: `pion/webrtc` data channels over the configurable STUN/TURN ICE
+  servers (`transport.New`) ✅, and a libp2p Kademlia DHT signaler
+  (`signaling.NewDHT`) exchanging SDP over authenticated streams ✅.
 - `pkg/node` ties account + sessions + transport into a working link; two nodes
-  exchange an E2E message in-process (see `cmd/stunnerd`).
-- _Pending:_ `pion/webrtc` over STUN/TURN + libp2p Kademlia DHT backends.
+  exchange an E2E message (see `cmd/stunnerd`).
 
 ## Phase 5 — Storage & history ✅ (reference)
 
