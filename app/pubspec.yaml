@@ -10,17 +10,10 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  # FFI to the Go core (desktop c-shared library).
+  # FFI to the Go core (desktop c-shared library / Android jniLibs).
   ffi: ^2.1.0
-  # Emoji support.
-  emoji_picker_flutter: ^3.1.0
-  # Animated emoji (Lottie JSON). APNG/WebP handled by Flutter's image codecs.
-  lottie: ^3.1.2
-  # File transfer: picking files to send.
-  file_picker: ^8.0.0
-  # Contact exchange: render your identity as a QR code and scan a peer's.
+  # Render the identity contact code as a QR (pure Dart, no native plugin).
   qr_flutter: ^4.1.0
-  mobile_scanner: ^5.1.1
 
 dev_dependencies:
   flutter_test:
@@ -29,5 +22,3 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-  # assets:
-  #   - assets/animated_emoji/   # bundled Lottie packs (added in roadmap phase 7)

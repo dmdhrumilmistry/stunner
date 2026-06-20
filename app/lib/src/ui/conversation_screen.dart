@@ -1,17 +1,16 @@
 import 'package:flutter/material.dart';
 
 import '../models/chat.dart';
+import '../services/chat_store.dart';
 import '../services/emoji.dart';
 
-/// A single conversation view with a message composer.
-///
-/// The composer includes hooks for emoji (Unicode + animated) and file
-/// attachment; sending is wired to the Go core's messaging service in a later
-/// roadmap phase.
+/// A single conversation: messages from [ChatStore], a working composer
+/// (emoji picker, attach, send), and read-receipt ticks on outgoing messages.
 class ConversationScreen extends StatefulWidget {
-  const ConversationScreen({super.key, required this.chat});
+  const ConversationScreen({super.key, required this.store, required this.chatId});
 
-  final Chat chat;
+  final ChatStore store;
+  final String chatId;
 
   @override
   State<ConversationScreen> createState() => _ConversationScreenState();
@@ -19,42 +18,118 @@ class ConversationScreen extends StatefulWidget {
 
 class _ConversationScreenState extends State<ConversationScreen> {
   final _controller = TextEditingController();
-  final _messages = <Message>[
-    const Message(id: 'm1', text: 'Hey! 👋', fromMe: false),
-    const Message(id: 'm2', text: 'Hi — end-to-end encrypted 🔒', fromMe: true),
-  ];
+  final _scroll = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    // Opening the conversation marks it read.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      widget.store.markRead(widget.chatId);
+    });
+  }
 
   @override
   void dispose() {
     _controller.dispose();
+    _scroll.dispose();
     super.dispose();
   }
 
   void _send() {
-    final text = expandShortcodes(_controller.text.trim());
-    if (text.isEmpty) return;
-    setState(() {
-      _messages.add(Message(id: 'local-${_messages.length}', text: text, fromMe: true));
-      _controller.clear();
-    });
-    // TODO: deliver via the core's node/link (core.sendText over FFI) once the
-    // stateful runtime is exposed across the boundary.
+    final text = expandShortcodes(_controller.text);
+    if (text.trim().isEmpty) return;
+    widget.store.sendText(widget.chatId, text);
+    _controller.clear();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+  }
+
+  void _scrollToBottom() {
+    if (_scroll.hasClients) {
+      _scroll.animateTo(
+        _scroll.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+    }
+  }
+
+  Future<void> _pickEmoji() async {
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: GridView.count(
+          crossAxisCount: 8,
+          shrinkWrap: true,
+          padding: const EdgeInsets.all(8),
+          children: [
+            for (final e in pickerEmojis)
+              IconButton(
+                onPressed: () => Navigator.pop(ctx, e),
+                icon: Text(e, style: const TextStyle(fontSize: 24)),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (picked == null) return;
+    final sel = _controller.selection;
+    final text = _controller.text;
+    if (sel.isValid) {
+      _controller.text = text.replaceRange(sel.start, sel.end, picked);
+      _controller.selection =
+          TextSelection.collapsed(offset: sel.start + picked.length);
+    } else {
+      _controller.text = text + picked;
+      _controller.selection =
+          TextSelection.collapsed(offset: _controller.text.length);
+    }
+  }
+
+  void _attach() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('File sharing needs a live connection (coming soon).'),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.chat.displayName)),
+      appBar: AppBar(
+        title: ListenableBuilder(
+          listenable: widget.store,
+          builder: (_, __) => Text(widget.store.chatById(widget.chatId).name),
+        ),
+      ),
       body: Column(
         children: [
           Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.all(12),
-              itemCount: _messages.length,
-              itemBuilder: (context, i) => _Bubble(message: _messages[i]),
+            child: ListenableBuilder(
+              listenable: widget.store,
+              builder: (context, _) {
+                final messages = widget.store.chatById(widget.chatId).messages;
+                if (messages.isEmpty) {
+                  return const Center(child: Text('Say hello 👋'));
+                }
+                return ListView.builder(
+                  controller: _scroll,
+                  padding: const EdgeInsets.all(12),
+                  itemCount: messages.length,
+                  itemBuilder: (context, i) => _Bubble(message: messages[i]),
+                );
+              },
             ),
           ),
-          SafeArea(child: _Composer(controller: _controller, onSend: _send)),
+          SafeArea(
+            child: _Composer(
+              controller: _controller,
+              onSend: _send,
+              onEmoji: _pickEmoji,
+              onAttach: _attach,
+            ),
+          ),
         ],
       ),
     );
@@ -74,21 +149,74 @@ class _Bubble extends StatelessWidget {
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 4),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.78,
+        ),
         decoration: BoxDecoration(
-          color: message.fromMe ? scheme.primaryContainer : scheme.surfaceContainerHighest,
+          color: message.fromMe
+              ? scheme.primaryContainer
+              : scheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(16),
         ),
-        child: Text(message.text),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text(message.text),
+            const SizedBox(height: 2),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _formatTime(message.time),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                if (message.fromMe) ...[
+                  const SizedBox(width: 4),
+                  _ReceiptTick(status: message.status),
+                ],
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
+/// Read-receipt indicator: clock (sending), single check (sent), double check
+/// (delivered), blue double check (read).
+class _ReceiptTick extends StatelessWidget {
+  const _ReceiptTick({required this.status});
+
+  final DeliveryStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    switch (status) {
+      case DeliveryStatus.sending:
+        return const Icon(Icons.schedule, size: 14, color: Colors.grey);
+      case DeliveryStatus.sent:
+        return const Icon(Icons.check, size: 14, color: Colors.grey);
+      case DeliveryStatus.delivered:
+        return const Icon(Icons.done_all, size: 14, color: Colors.grey);
+      case DeliveryStatus.read:
+        return Icon(Icons.done_all, size: 14, color: Colors.blue.shade400);
+    }
+  }
+}
+
 class _Composer extends StatelessWidget {
-  const _Composer({required this.controller, required this.onSend});
+  const _Composer({
+    required this.controller,
+    required this.onSend,
+    required this.onEmoji,
+    required this.onAttach,
+  });
 
   final TextEditingController controller;
   final VoidCallback onSend;
+  final VoidCallback onEmoji;
+  final VoidCallback onAttach;
 
   @override
   Widget build(BuildContext context) {
@@ -99,18 +227,19 @@ class _Composer extends StatelessWidget {
           IconButton(
             tooltip: 'Emoji',
             icon: const Icon(Icons.emoji_emotions_outlined),
-            onPressed: () {}, // TODO(phase 7): emoji_picker_flutter sheet
+            onPressed: onEmoji,
           ),
           IconButton(
             tooltip: 'Attach file',
             icon: const Icon(Icons.attach_file),
-            onPressed: () {}, // TODO(phase 6): file_picker + filetransfer
+            onPressed: onAttach,
           ),
           Expanded(
             child: TextField(
               controller: controller,
               minLines: 1,
               maxLines: 5,
+              textInputAction: TextInputAction.send,
               decoration: const InputDecoration(
                 hintText: 'Message',
                 border: OutlineInputBorder(),
@@ -128,4 +257,10 @@ class _Composer extends StatelessWidget {
       ),
     );
   }
+}
+
+String _formatTime(DateTime t) {
+  final h = t.hour.toString().padLeft(2, '0');
+  final m = t.minute.toString().padLeft(2, '0');
+  return '$h:$m';
 }

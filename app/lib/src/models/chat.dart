@@ -1,43 +1,39 @@
-// UI-side models. These mirror parts of the Go core's messaging model
-// (core/pkg/messaging) and will eventually be populated from the core over FFI.
+/// UI-side models. These mirror parts of the Go core's messaging model
+/// (core/pkg/messaging) and are driven by [ChatStore].
 
-class Chat {
-  const Chat({
-    required this.id,
-    required this.displayName,
-    required this.lastMessage,
-    this.unread = 0,
-  });
-
-  final String id;
-  final String displayName;
-  final String lastMessage;
-  final int unread;
-}
+/// Delivery state of an outgoing message, mirroring messaging.DeliveryState.
+enum DeliveryStatus { sending, sent, delivered, read }
 
 class Message {
-  const Message({
+  Message({
     required this.id,
     required this.text,
     required this.fromMe,
-  });
+    DateTime? time,
+    this.status = DeliveryStatus.sent,
+  }) : time = time ?? DateTime.now();
 
   final String id;
   final String text;
   final bool fromMe;
+  final DateTime time;
+
+  /// Delivery status (only meaningful for outgoing messages).
+  DeliveryStatus status;
 }
 
-/// Placeholder data so the UI shell is browsable before the core is wired up.
-const sampleChats = <Chat>[
-  Chat(
-    id: 'c1',
-    displayName: 'Alice',
-    lastMessage: 'See you tomorrow 👋',
-    unread: 2,
-  ),
-  Chat(
-    id: 'c2',
-    displayName: 'Bob',
-    lastMessage: 'Sent you a file 📎',
-  ),
-];
+class Chat {
+  Chat({
+    required this.id,
+    required this.name,
+    List<Message>? messages,
+    this.unread = 0,
+  }) : messages = messages ?? [];
+
+  final String id;
+  String name;
+  final List<Message> messages;
+  int unread;
+
+  Message? get last => messages.isEmpty ? null : messages.last;
+}
