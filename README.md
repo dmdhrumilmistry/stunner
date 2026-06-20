@@ -9,9 +9,17 @@ cryptography live in a single **Go core**; the UI is a **Flutter** app that
 calls the core over FFI. Messages travel **directly between devices** over
 encrypted WebRTC data channels — there is no central message server.
 
-> ⚠️ **Status: design + scaffolding.** This repository currently contains the
-> architecture documents and a compiling project skeleton. Most features are
-> stubs with `TODO` markers. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+> ⚠️ **Status: working reference core.** The full pipeline — X3DH + Double
+> Ratchet E2E encryption, messaging, chunked file transfer, encrypted-at-rest
+> storage, safety-number verification, and an optional offline mailbox — is
+> implemented and unit-tested in Go (standard library only) and runs end-to-end
+> in-process (`cd core && go run ./cmd/stunnerd`). What remains is swapping the
+> in-process/reference backends for production ones (pion/webrtc, libp2p,
+> SQLCipher) behind the same interfaces. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+>
+> 🔒 **Crypto not yet audited.** The X3DH/Double Ratchet composition is built
+> from vetted stdlib primitives but must receive an independent review before
+> production use — see [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
 ## Why "Stunner"
 

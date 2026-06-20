@@ -1,22 +1,28 @@
 // Package crypto provides end-to-end encryption for Stunner.
 //
 // Stunner uses the Signal protocol: an X3DH handshake establishes a shared
-// secret from published prekeys, and the Double Ratchet derives a fresh key per
-// message, giving forward secrecy and post-compromise security.
+// secret from published prekeys (x3dh.go), and the Double Ratchet derives a
+// fresh key per message, giving forward secrecy and post-compromise security
+// (ratchet.go, session.go).
 //
-// IMPORTANT: cryptographic primitives are NEVER hand-rolled. The implementation
-// wraps a vetted library (planned: go.mau.fi/libsignal). File payloads are
-// sealed with an AEAD (XChaCha20-Poly1305) under a per-transfer key carried
-// inside the secure session.
+// IMPORTANT: the primitives are the Go standard library's vetted AES-GCM,
+// HMAC-SHA256, SHA-512 and X25519. The Double Ratchet / X3DH *composition* here
+// is a from-scratch reference implementation and MUST receive an independent
+// cryptographic audit before production; swapping in a maintained library such
+// as go.mau.fi/libsignal remains a tracked option (see docs/ROADMAP.md).
 //
-// This file defines the stable interfaces the rest of the core depends on; the
-// concrete implementation is added in roadmap phase 3.
+// File payloads are sealed with AES-256-GCM under a per-transfer key carried
+// inside the secure session (SealFile/OpenFile, used by pkg/filetransfer).
 package crypto
 
-import "errors"
+import (
+	"crypto/aes"
+	"crypto/cipher"
+	"errors"
+)
 
-// ErrNotImplemented marks skeleton stubs awaiting a roadmap phase.
-var ErrNotImplemented = errors.New("crypto: not implemented (see docs/ROADMAP.md phase 3)")
+// ErrNotImplemented is retained for callers that branch on optional features.
+var ErrNotImplemented = errors.New("crypto: not implemented")
 
 // Session is an established, end-to-end-encrypted channel with one peer.
 // Encrypt/Decrypt operate on whole application envelopes (see docs/PROTOCOL.md
@@ -30,27 +36,39 @@ type Session interface {
 	PeerFingerprint() string
 }
 
-// SessionStore manages secure sessions and the prekeys/state the Signal
-// protocol requires. Backed by pkg/storage in later phases.
-type SessionStore interface {
-	// Get returns an existing session for a peer identity, if any.
-	Get(peerID string) (Session, bool)
-	// Establish runs X3DH against a peer's published prekey bundle and returns
-	// a new session.
-	Establish(peerID string, prekeyBundle []byte) (Session, error)
-}
-
-// SealFile seals a single file chunk with an AEAD under transferKey.
-// nonce is derived from the chunk index (see docs/PROTOCOL.md §5).
-//
-// TODO(phase 6): implement with XChaCha20-Poly1305.
+// SealFile seals a single file chunk with AES-256-GCM under transferKey. nonce
+// must be unique per (key, chunk); pkg/filetransfer derives it from the chunk
+// index. Returns ciphertext||tag.
 func SealFile(transferKey, nonce, plaintext []byte) ([]byte, error) {
-	return nil, ErrNotImplemented
+	gcm, err := fileGCM(transferKey)
+	if err != nil {
+		return nil, err
+	}
+	if len(nonce) != gcm.NonceSize() {
+		return nil, errors.New("crypto: bad file nonce size")
+	}
+	return gcm.Seal(nil, nonce, plaintext, nil), nil
 }
 
 // OpenFile reverses SealFile.
-//
-// TODO(phase 6): implement with XChaCha20-Poly1305.
 func OpenFile(transferKey, nonce, ciphertext []byte) ([]byte, error) {
-	return nil, ErrNotImplemented
+	gcm, err := fileGCM(transferKey)
+	if err != nil {
+		return nil, err
+	}
+	if len(nonce) != gcm.NonceSize() {
+		return nil, errors.New("crypto: bad file nonce size")
+	}
+	return gcm.Open(nil, nonce, ciphertext, nil)
+}
+
+func fileGCM(key []byte) (cipher.AEAD, error) {
+	if len(key) != 32 {
+		return nil, errors.New("crypto: transfer key must be 32 bytes")
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	return cipher.NewGCM(block)
 }

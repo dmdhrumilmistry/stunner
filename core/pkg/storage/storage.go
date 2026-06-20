@@ -10,14 +10,9 @@
 package storage
 
 import (
-	"errors"
-
 	"github.com/dmdhrumilmistry/stunner/core/pkg/messaging"
 	"github.com/dmdhrumilmistry/stunner/core/pkg/settings"
 )
-
-// ErrNotImplemented marks skeleton stubs awaiting a roadmap phase.
-var ErrNotImplemented = errors.New("storage: not implemented (see docs/ROADMAP.md phase 5)")
 
 // Store is the encrypted persistence API used by the rest of the core.
 type Store interface {
@@ -47,15 +42,17 @@ type Store interface {
 type Options struct {
 	// Path is the database file location.
 	Path string
-	// Key is the SQLCipher key, supplied by the app from the OS secure store.
+	// Key is the database key, supplied by the app from the OS secure store.
 	// It must never be logged or persisted in plaintext by this package.
 	Key []byte
 }
 
-// Open opens (or creates) the encrypted store.
+// Open opens (or creates) the encrypted store at opts.Path, encrypting all
+// contents at rest with opts.Key (see filestore.go).
 //
-// TODO(phase 5): open a SQLCipher database with opts.Key, run migrations, and
-// return a working Store.
+// The reference implementation is a single vault-sealed JSON file. Swapping in
+// SQLCipher for indexed, incremental access is a tracked option
+// (docs/ROADMAP.md) and only this package changes.
 func Open(opts Options) (Store, error) {
-	return nil, ErrNotImplemented
+	return openFileStore(opts)
 }

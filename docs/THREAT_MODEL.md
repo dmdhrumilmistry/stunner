@@ -77,6 +77,20 @@ implementation matures.
 - **Public infrastructure:** default STUN/TURN servers are operated by third
   parties; for sensitive use, self-host.
 
+## Status of the cryptography (important)
+
+The current `pkg/crypto` implements X3DH and the Double Ratchet **from scratch**
+over the Go standard library's vetted primitives (AES-256-GCM, HMAC-SHA256,
+SHA-512, X25519 via `crypto/ecdh`). The *primitives* are not hand-rolled, but the
+*protocol composition* is, and it has **not been independently audited**.
+
+- Do not rely on this for high-risk use until it is reviewed.
+- Swapping in a maintained implementation (e.g. `go.mau.fi/libsignal`) behind the
+  existing `crypto.Session` / `crypto.SessionStore` interfaces is a tracked
+  option and would not change the rest of the core.
+- Message headers are authenticated as AEAD associated data, and every message
+  binds both parties' identity keys (sorted) to resist unknown-key-share.
+
 ## Cryptographic discipline
 
 - Never implement primitives by hand; use vetted libraries (see

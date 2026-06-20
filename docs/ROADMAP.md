@@ -1,10 +1,31 @@
 # Stunner Roadmap
 
-A phased plan from the current skeleton to a working messenger. Each phase is
-designed to be independently buildable and reviewable. Phases introduce external
-dependencies gradually — the skeleton itself uses only the Go standard library.
+A phased plan from skeleton to a working messenger. Each phase is independently
+buildable and reviewable.
 
-## Phase 1 — Skeleton ✅ (this repo)
+## Status
+
+Phases 1–8 are implemented as a **stdlib-only reference core** whose entire
+pipeline runs and is unit-tested in-process. What remains is swapping the
+in-process/reference backends for production ones behind the same interfaces:
+
+| Concern | Implemented now (stdlib) | Production backend (pending) |
+|---|---|---|
+| E2E crypto | from-scratch X3DH + Double Ratchet (`pkg/crypto`) | optionally `go.mau.fi/libsignal`; **needs audit** |
+| Transport | in-process pipe (`transport.Pipe`) | `pion/webrtc` data channels over STUN/TURN |
+| Signaling | in-memory registry (`signaling.Registry`) | libp2p Kademlia DHT |
+| Storage | vault-sealed JSON file (`storage` file store) | SQLCipher |
+| Offline relay | in-memory mailbox (`pkg/mailbox`) | networked self-hostable relay |
+| Mobile FFI | gomobile-ready surface | `gomobile bind` artifacts + stateful runtime binding |
+
+> ⚠️ **Crypto audit required.** The X3DH/Double Ratchet composition is a
+> from-scratch implementation over vetted stdlib primitives (AES-GCM,
+> HMAC-SHA256, SHA-512, X25519). It must receive an independent review before any
+> production use. See `docs/THREAT_MODEL.md`.
+
+Run the whole pipeline end-to-end: `cd core && go run ./cmd/stunnerd`.
+
+## Phase 1 — Skeleton ✅
 
 - Repository layout, docs (architecture, threat model, protocol, roadmap).
 - Go core module with stub packages and stable interfaces.
@@ -18,47 +39,53 @@ dependencies gradually — the skeleton itself uses only the Go standard library
 **Done when:** `go build ./... && go vet ./... && go test ./...` is green and
 `go run ./cmd/stunnerd` prints the version and a generated fingerprint.
 
-## Phase 2 — Identity & verification
+## Phase 2 — Identity & verification ✅
 
-- Persist identity in `pkg/storage` (encrypted).
-- Safety numbers + QR encode/decode.
-- Contact model and key-change detection.
+- Encrypted-at-rest identity (`pkg/account` + `pkg/vault`), reloads across runs.
+- Safety numbers (`pkg/safetynumber`, Signal-style 60-digit, symmetric).
+- Contact model with TOFU key-change detection and `stunner:contact` QR/URI
+  exchange (`pkg/contact`).
+- Flutter: My-identity screen (QR + safety-number verification).
 
-## Phase 3 — Secure sessions (Signal)
+## Phase 3 — Secure sessions (Signal) ✅
 
-- Integrate `go.mau.fi/libsignal`: X3DH handshake, Double Ratchet.
-- Prekey generation/management.
-- Encrypt/decrypt application envelopes over an in-memory loopback transport
-  (no network yet) to validate the crypto pipeline end-to-end.
+- X3DH handshake + Double Ratchet (`pkg/crypto`): forward secrecy, out-of-order
+  delivery, skipped-key handling, AEAD-bound headers and identity binding.
+- Prekey generation/bundles; in-memory session store.
+- _Pending:_ optional swap to `go.mau.fi/libsignal`; **independent audit**.
 
-## Phase 4 — Transport & signaling
+## Phase 4 — Transport & signaling ✅ (reference)
 
-- `pkg/transport`: `pion/webrtc` data channels with configurable ICE servers.
-- `pkg/signaling`: `Signaler` interface + libp2p Kademlia DHT implementation.
-- Goal: two `stunnerd` instances discover each other and exchange an encrypted
-  message over a real WebRTC data channel using STUN (TURN when needed).
+- `Signaler` interface + in-memory `signaling.Registry` (discovery, SDP/ICE,
+  presence); in-process `transport.Pipe` data channel.
+- `pkg/node` ties account + sessions + transport into a working link; two nodes
+  exchange an E2E message in-process (see `cmd/stunnerd`).
+- _Pending:_ `pion/webrtc` over STUN/TURN + libp2p Kademlia DHT backends.
 
-## Phase 5 — Storage & history
+## Phase 5 — Storage & history ✅ (reference)
 
-- `pkg/storage`: SQLCipher schema for conversations, messages, contacts, keys.
-- DB key sourced from OS secure store (per-platform shims via the app).
-- Outbox + retry; delivery/read receipts.
+- `pkg/storage` encrypted file store (vault/AES-256-GCM): settings,
+  conversations, messages, outbox, blobs; key from the app's secure store.
+- _Pending:_ SQLCipher backend for indexed/incremental access.
 
-## Phase 6 — File transfer
+## Phase 6 — File transfer ✅
 
-- `pkg/filetransfer`: chunked, AEAD-sealed, resumable transfers with integrity
-  verification, wired to data-channel backpressure.
+- `pkg/filetransfer`: chunked, AEAD-sealed, out-of-order-tolerant transfers with
+  SHA-256 integrity; wired through `node.Link.SendFile`/`ReceiveFile`.
+- _Pending:_ resume-on-reconnect + data-channel backpressure tuning.
 
-## Phase 7 — UX: emoji, animated emoji, settings
+## Phase 7 — UX: emoji, animated emoji, settings ✅
 
-- Emoji picker (Unicode) and animated emoji rendering (Lottie/APNG) in Flutter.
-- Settings UI: STUN/TURN override, optional-relay toggle, app-lock
-  (biometric/PIN), disappearing-message timers.
+- `pkg/emoji`: shortcode expansion + animated-emoji pack manifest.
+- Flutter: emoji shortcode expansion in the composer; settings for STUN/TURN
+  override, optional-relay toggle, app-lock; QR identity screen.
+- _Pending:_ full emoji picker sheet + Lottie rendering wired to packs.
 
-## Phase 8 — Optional offline relay
+## Phase 8 — Optional offline relay ✅ (reference)
 
-- Self-hostable, content-blind encrypted mailbox for offline delivery.
-- Off by default; documented metadata tradeoffs.
+- `pkg/mailbox`: content-blind store-and-forward; `node.SendOffline` /
+  `FetchOffline` perform offline X3DH + ratchet. Off by default.
+- _Pending:_ networked, self-hostable relay deployment.
 
 ## Cross-cutting / later
 

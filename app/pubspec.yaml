@@ -18,6 +18,9 @@ dependencies:
   lottie: ^3.1.2
   # File transfer: picking files to send.
   file_picker: ^8.0.0
+  # Contact exchange: render your identity as a QR code and scan a peer's.
+  qr_flutter: ^4.1.0
+  mobile_scanner: ^5.1.1
 
 dev_dependencies:
   flutter_test:
