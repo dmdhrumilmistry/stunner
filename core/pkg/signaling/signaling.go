@@ -1,19 +1,17 @@
 // Package signaling discovers peers and exchanges the SDP/ICE needed to open a
 // WebRTC connection — without a central server.
 //
-// The default implementation (roadmap phase 4) is a libp2p host participating in
-// a Kademlia DHT: a user advertises and is found under a salted hash of their
+// The production implementation (libp2p.go) is a libp2p host participating in a
+// Kademlia DHT: a node advertises and is found under a salted hash of its
 // identity key (the "discovery key", see pkg/identity.DiscoveryKey), and SDP/ICE
-// is exchanged over an authenticated libp2p stream. An optional relay
-// implementation is available for networks hostile to DHT traffic.
-//
-// This file defines the pluggable Signaler interface.
+// is exchanged over authenticated libp2p streams. An in-memory Registry
+// (memory.go) provides the same interface for tests and the headless harness.
 package signaling
 
 import "errors"
 
-// ErrNotImplemented marks skeleton stubs awaiting a roadmap phase.
-var ErrNotImplemented = errors.New("signaling: not implemented (see docs/ROADMAP.md phase 4)")
+// ErrNotImplemented is returned by the in-memory signaler when a lookup fails.
+var ErrNotImplemented = errors.New("signaling: peer not found")
 
 // PeerInfo is what discovery yields for a peer: an identity and the addresses
 // the signaling layer can reach it on.
@@ -23,8 +21,8 @@ type PeerInfo struct {
 }
 
 // Signaler is the pluggable control-plane abstraction. Implementations:
-//   - DHT (default, decentralized): libp2p Kademlia.
-//   - Relay (optional): a minimal self-hostable signaling server.
+//   - DHTSignaler (production, decentralized): libp2p Kademlia (libp2p.go).
+//   - Registry/memSignaler (tests, in-process): memory.go.
 type Signaler interface {
 	// Advertise publishes this node under discoveryKey so peers can find it.
 	Advertise(discoveryKey []byte) error
@@ -44,18 +42,4 @@ type Signaler interface {
 
 	// Close shuts down the signaler.
 	Close() error
-}
-
-// NewDHT constructs the default decentralized signaler.
-//
-// TODO(phase 4): build a libp2p host + Kademlia DHT and implement Signaler.
-func NewDHT() (Signaler, error) {
-	return nil, ErrNotImplemented
-}
-
-// NewRelay constructs an optional relay-backed signaler.
-//
-// TODO(phase 8): connect to a self-hostable signaling/mailbox relay.
-func NewRelay(address string) (Signaler, error) {
-	return nil, ErrNotImplemented
 }

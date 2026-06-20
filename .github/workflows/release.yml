@@ -1,0 +1,133 @@
+name: Release
+
+# Tag a commit (e.g. `git tag v0.3.0 && git push origin v0.3.0`) to build
+# cross-platform artifacts and publish a GitHub Release with them attached.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  # Cross-compiled stunnerd CLI binaries (pure Go, CGO disabled).
+  binaries:
+    name: stunnerd ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: core/go.sum
+      - name: Build
+        working-directory: core
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          bin=stunnerd
+          [ "$GOOS" = windows ] && bin=stunnerd.exe
+          mkdir -p dist
+          go build -trimpath -ldflags "-s -w" -o "dist/$bin" ./cmd/stunnerd
+      - name: Package
+        working-directory: core/dist
+        shell: bash
+        run: |
+          name="stunnerd_${GITHUB_REF_NAME}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          if [ "${{ matrix.goos }}" = windows ]; then
+            zip "$name.zip" stunnerd.exe
+            sha256sum "$name.zip" > "$name.zip.sha256"
+          else
+            tar czf "$name.tar.gz" stunnerd
+            sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+          fi
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            core/dist/*.tar.gz
+            core/dist/*.zip
+            core/dist/*.sha256
+
+  # Desktop c-shared libraries (cgo) built on native runners.
+  libraries:
+    name: libstunner (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, ext: so }
+          - { os: macos-latest, ext: dylib }
+          - { os: windows-latest, ext: dll }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: core/go.sum
+      - name: Build c-shared library
+        working-directory: core
+        shell: bash
+        env:
+          CGO_ENABLED: "1"
+        run: go build -buildmode=c-shared -o "libstunner.${{ matrix.ext }}" ./ffi
+      - name: Package
+        working-directory: core
+        shell: bash
+        run: |
+          name="libstunner_${GITHUB_REF_NAME}_${{ runner.os }}_${{ runner.arch }}"
+          mkdir -p dist
+          cp "libstunner.${{ matrix.ext }}" libstunner.h dist/
+          tar czf "dist/$name.tar.gz" -C dist "libstunner.${{ matrix.ext }}" libstunner.h
+          ( cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256" )
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            core/dist/*.tar.gz
+            core/dist/*.sha256
+
+  # Android .aar via gomobile (best effort: needs the NDK, so failures here do
+  # not block the rest of the release).
+  android-aar:
+    name: stunnercore.aar (Android)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: core/go.sum
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - name: Install NDK
+        run: sdkmanager "ndk;26.3.11579264"
+      - name: Build AAR
+        working-directory: core
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/26.3.11579264
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          gomobile init
+          gomobile bind -target=android -o stunnercore.aar ./mobile
+          mkdir -p dist
+          mv stunnercore.aar "dist/stunnercore_${GITHUB_REF_NAME}.aar"
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: core/dist/*.aar
