@@ -175,6 +175,20 @@ jobs:
       - name: Generate Android project
         working-directory: app
         run: flutter create --platforms=android .
+      - name: Bump Android compileSdk to 36
+        working-directory: app
+        shell: bash
+        # The bundled plugins (file_picker / mobile_scanner via
+        # flutter_plugin_android_lifecycle) require compileSdk >= 36, but
+        # `flutter create` defaults to 34. Override it in the generated project.
+        run: |
+          for f in android/app/build.gradle.kts android/app/build.gradle; do
+            [ -f "$f" ] || continue
+            sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 36/' "$f"
+            sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 36/' "$f"
+            sed -i -E 's/compileSdk(Version)?[ =]+[0-9]+/compileSdk = 36/' "$f"
+          done
+          echo "android.suppressUnsupportedCompileSdk=36" >> android/gradle.properties
       - name: Build Go core for Android ABIs (jniLibs)
         shell: bash
         run: |
