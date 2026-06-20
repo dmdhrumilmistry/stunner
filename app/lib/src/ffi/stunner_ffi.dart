@@ -1,0 +1,96 @@
+// Dart FFI binding to the Stunner Go core (desktop c-shared library).
+//
+// The Go core is compiled with `go build -buildmode=c-shared` into
+// libstunner.{so,dylib,dll} (see ../../../docs/ROADMAP.md). On mobile the core
+// is bound via gomobile instead; that path is wired up in a later phase.
+//
+// This binding proves the boundary with Version/Ping/NewIdentityFingerprint.
+// Strings returned by the core are heap-allocated in Go and freed via
+// StunnerFree to avoid leaks.
+
+import 'dart:ffi';
+import 'dart:io';
+import 'package:ffi/ffi.dart';
+
+// C signatures.
+typedef _VersionC = Pointer<Utf8> Function();
+typedef _VersionDart = Pointer<Utf8> Function();
+
+typedef _PingC = Pointer<Utf8> Function(Pointer<Utf8>);
+typedef _PingDart = Pointer<Utf8> Function(Pointer<Utf8>);
+
+typedef _FingerprintC = Pointer<Utf8> Function();
+typedef _FingerprintDart = Pointer<Utf8> Function();
+
+typedef _FreeC = Void Function(Pointer<Utf8>);
+typedef _FreeDart = void Function(Pointer<Utf8>);
+
+/// Thin wrapper over the native Stunner core.
+///
+/// Construct with [StunnerCore.open]. If the native library is not present
+/// (e.g. running the UI shell before building the core), [available] is false
+/// and the call methods return placeholder values so the app still runs.
+class StunnerCore {
+  StunnerCore._(this._lib);
+
+  final DynamicLibrary? _lib;
+
+  bool get available => _lib != null;
+
+  late final _VersionDart _version =
+      _lib!.lookupFunction<_VersionC, _VersionDart>('StunnerVersion');
+  late final _PingDart _ping =
+      _lib!.lookupFunction<_PingC, _PingDart>('StunnerPing');
+  late final _FingerprintDart _fingerprint = _lib!
+      .lookupFunction<_FingerprintC, _FingerprintDart>(
+          'StunnerNewIdentityFingerprint');
+  late final _FreeDart _free =
+      _lib!.lookupFunction<_FreeC, _FreeDart>('StunnerFree');
+
+  /// Loads the native library for the current desktop platform.
+  static StunnerCore open() {
+    try {
+      return StunnerCore._(_load());
+    } on Object {
+      // Library not built yet — run in degraded mode.
+      return StunnerCore._(null);
+    }
+  }
+
+  static DynamicLibrary _load() {
+    if (Platform.isMacOS) return DynamicLibrary.open('libstunner.dylib');
+    if (Platform.isWindows) return DynamicLibrary.open('stunner.dll');
+    if (Platform.isLinux) return DynamicLibrary.open('libstunner.so');
+    // On Android/iOS the core is statically linked via gomobile (later phase).
+    return DynamicLibrary.process();
+  }
+
+  String version() {
+    if (!available) return 'core unavailable (build libstunner)';
+    final ptr = _version();
+    final s = ptr.toDartString();
+    _free(ptr);
+    return s;
+  }
+
+  String ping(String msg) {
+    if (!available) return 'core unavailable';
+    final arg = msg.toNativeUtf8();
+    try {
+      final ptr = _ping(arg);
+      final s = ptr.toDartString();
+      _free(ptr);
+      return s;
+    } finally {
+      malloc.free(arg);
+    }
+  }
+
+  String newIdentityFingerprint() {
+    if (!available) return 'core unavailable';
+    final ptr = _fingerprint();
+    final s = ptr.toDartString();
+    _free(ptr);
+    return s;
+  }
+}
