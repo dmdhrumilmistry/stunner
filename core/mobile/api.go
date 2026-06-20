@@ -31,10 +31,22 @@ func SafetyNumber(myContactURI, peerContactURI string) (string, error) {
 	return core.SafetyNumber(myContactURI, peerContactURI)
 }
 
+// ContactInfo is the gobind-friendly result of ValidateContactURI. gomobile
+// requires exported functions to return at most one value plus an error, so the
+// two fields are wrapped in a struct (exposed as a class to Java/Swift).
+type ContactInfo struct {
+	Handle      string
+	Fingerprint string
+}
+
 // ValidateContactURI parses a scanned contact URI, returning the handle and
-// identity fingerprint (gomobile maps multiple returns to an out-param struct).
-func ValidateContactURI(uri string) (handle string, fingerprint string, err error) {
-	return core.ValidateContactURI(uri)
+// identity fingerprint.
+func ValidateContactURI(uri string) (*ContactInfo, error) {
+	handle, fingerprint, err := core.ValidateContactURI(uri)
+	if err != nil {
+		return nil, err
+	}
+	return &ContactInfo{Handle: handle, Fingerprint: fingerprint}, nil
 }
 
 // EventHandler receives asynchronous events pushed from the core (incoming
