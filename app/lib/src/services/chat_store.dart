@@ -4,28 +4,32 @@ import 'package:flutter/foundation.dart';
 
 import '../models/chat.dart';
 
-/// In-memory chat state shared by the chats list and the conversation view, so
-/// the two always stay in sync. This is a local demo store: the live two-device
-/// path (WebRTC over STUN/TURN via the Go core) is wired over FFI in a later
-/// step. Outgoing messages simulate delivery/read receipts so the UX is
-/// representative.
+/// In-memory chats + contacts shared by every screen, so the list and the
+/// conversation always agree. Local demo store: the live two-device path
+/// (WebRTC over STUN/TURN via the Go core) is wired over FFI in a later step.
 class ChatStore extends ChangeNotifier {
   ChatStore() {
     _seed();
   }
 
+  final List<Contact> _contacts = [];
   final List<Chat> _chats = [];
 
+  List<Contact> get contacts => List.unmodifiable(_contacts);
   List<Chat> get chats => List.unmodifiable(_chats);
 
   Chat chatById(String id) => _chats.firstWhere((c) => c.id == id);
 
   void _seed() {
     final now = DateTime.now();
+    final alice = Contact(id: 'k-alice', name: 'Alice');
+    final bob = Contact(id: 'k-bob', name: 'Bob');
+    _contacts.addAll([alice, bob]);
     _chats.addAll([
       Chat(
         id: 'c1',
-        name: 'Alice',
+        contactId: alice.id,
+        name: alice.name,
         messages: [
           Message(
             id: 'm1',
@@ -44,7 +48,8 @@ class ChatStore extends ChangeNotifier {
       ),
       Chat(
         id: 'c2',
-        name: 'Bob',
+        contactId: bob.id,
+        name: bob.name,
         unread: 1,
         messages: [
           Message(
@@ -58,17 +63,68 @@ class ChatStore extends ChangeNotifier {
     ]);
   }
 
-  /// Adds a new conversation and returns its id.
-  String addChat(String name) {
-    final trimmed = name.trim();
-    final id = 'c${DateTime.now().microsecondsSinceEpoch}';
-    _chats.insert(0, Chat(id: id, name: trimmed.isEmpty ? 'New contact' : trimmed));
+  // --- contacts ---
+
+  /// Adds (or updates) a contact and returns it. Deduplicated by fingerprint
+  /// when present, otherwise by name.
+  Contact addContact({required String name, String code = '', String fingerprint = ''}) {
+    final cleanName = name.trim().isEmpty ? 'Unnamed' : name.trim();
+    final existing = _contacts.where((c) =>
+        (fingerprint.isNotEmpty && c.fingerprint == fingerprint) ||
+        (fingerprint.isEmpty && c.name == cleanName));
+    if (existing.isNotEmpty) {
+      existing.first.name = cleanName;
+      notifyListeners();
+      return existing.first;
+    }
+    final contact = Contact(
+      id: fingerprint.isNotEmpty ? fingerprint : 'k-${DateTime.now().microsecondsSinceEpoch}',
+      name: cleanName,
+      code: code,
+      fingerprint: fingerprint,
+    );
+    _contacts.add(contact);
     notifyListeners();
-    return id;
+    return contact;
   }
 
-  /// Sends a text message in a conversation and simulates delivery + read
-  /// receipts (local demo).
+  void deleteContact(String contactId) {
+    _contacts.removeWhere((c) => c.id == contactId);
+    notifyListeners();
+  }
+
+  // --- chats ---
+
+  /// Opens (or creates) the conversation with a contact and returns its id.
+  String startChatWith(Contact contact) {
+    final existing = _chats.where((c) => c.contactId == contact.id);
+    if (existing.isNotEmpty) {
+      final chat = existing.first;
+      _moveToTop(chat);
+      notifyListeners();
+      return chat.id;
+    }
+    final chat = Chat(
+      id: 'c${DateTime.now().microsecondsSinceEpoch}',
+      contactId: contact.id,
+      name: contact.name,
+    );
+    _chats.insert(0, chat);
+    notifyListeners();
+    return chat.id;
+  }
+
+  void deleteChat(String chatId) {
+    _chats.removeWhere((c) => c.id == chatId);
+    notifyListeners();
+  }
+
+  void deleteMessage(String chatId, String messageId) {
+    chatById(chatId).messages.removeWhere((m) => m.id == messageId);
+    notifyListeners();
+  }
+
+  /// Sends a text and simulates delivery + read receipts (local demo).
   void sendText(String chatId, String text) {
     final body = text.trim();
     if (body.isEmpty) return;
@@ -97,7 +153,6 @@ class ChatStore extends ChangeNotifier {
     });
   }
 
-  /// Marks a conversation as read (clears its unread badge).
   void markRead(String chatId) {
     final chat = chatById(chatId);
     if (chat.unread != 0) {

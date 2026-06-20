@@ -56,13 +56,27 @@ class _MyIdentityScreenState extends State<MyIdentityScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           Center(
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: QrImageView(
-                  data: _myUri,
-                  size: 220,
-                  version: QrVersions.auto,
+            // Always render the QR as black-on-white so it stays scannable in
+            // dark theme (default modules are black; a dark card behind them
+            // made it unreadable).
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: QrImageView(
+                data: _myUri,
+                size: 220,
+                version: QrVersions.auto,
+                backgroundColor: Colors.white,
+                eyeStyle: const QrEyeStyle(
+                  eyeShape: QrEyeShape.square,
+                  color: Colors.black,
+                ),
+                dataModuleStyle: const QrDataModuleStyle(
+                  dataModuleShape: QrDataModuleShape.square,
+                  color: Colors.black,
                 ),
               ),
             ),

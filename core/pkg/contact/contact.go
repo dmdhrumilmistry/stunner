@@ -55,6 +55,8 @@ type Book interface {
 	List() []Contact
 	// MarkVerified records that the user confirmed a contact's safety number.
 	MarkVerified(handle string) error
+	// Remove deletes a contact by handle. Removing an unknown handle is a no-op.
+	Remove(handle string) error
 }
 
 // Memory is an in-memory Book.
@@ -108,6 +110,13 @@ func (b *Memory) MarkVerified(handle string) error {
 	}
 	c.Verified = true
 	b.m[handle] = c
+	return nil
+}
+
+func (b *Memory) Remove(handle string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.m, handle)
 	return nil
 }
 
