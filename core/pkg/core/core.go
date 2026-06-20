@@ -5,14 +5,32 @@ package core
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/dmdhrumilmistry/stunner/core/pkg/contact"
 	"github.com/dmdhrumilmistry/stunner/core/pkg/identity"
+	"github.com/dmdhrumilmistry/stunner/core/pkg/netcheck"
 	"github.com/dmdhrumilmistry/stunner/core/pkg/safetynumber"
+	"github.com/dmdhrumilmistry/stunner/core/pkg/settings"
 )
 
 // Version is the semantic version of the Stunner core.
 const Version = "0.2.0"
+
+// stunProbeTimeout bounds how long CheckSTUN waits for ICE gathering.
+const stunProbeTimeout = 8 * time.Second
+
+// CheckSTUN probes the default STUN servers and reports whether a public
+// (server-reflexive) address could be discovered — the app's "Test STUN
+// connection" diagnostic. ok is true when STUN succeeded; detail is a
+// human-readable summary for display.
+func CheckSTUN() (ok bool, reflexiveAddr, detail string, err error) {
+	res, err := netcheck.STUN(settings.DefaultICEServers(), stunProbeTimeout)
+	if err != nil {
+		return false, "", "", err
+	}
+	return res.OK, res.ReflexiveAddr, res.Detail(), nil
+}
 
 // VersionString returns a human-readable version banner.
 func VersionString() string {
