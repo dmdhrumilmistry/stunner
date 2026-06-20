@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import '../ffi/stunner_ffi.dart';
 import 'my_identity_screen.dart';
 
-/// Settings: STUN/TURN override, optional relay, app lock, and a diagnostics
-/// section that exercises the Go core over FFI.
+/// Settings: network (STUN/TURN), security, and an honest note about the
+/// current local-only build.
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key, required this.core});
 
@@ -18,29 +18,71 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _relayEnabled = false;
   String _appLock = 'none';
 
+  void _showIceServers() {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('ICE servers (STUN/TURN)'),
+        content: const Text(
+          'Defaults:\n'
+          '  • stun:stun.l.google.com:19302\n'
+          '  • stun:stun1.l.google.com:19302\n\n'
+          'Override these with your own STUN/TURN (e.g. a self-hosted coturn) '
+          'in the core settings. Public STUN only assists discovery; for '
+          'restrictive networks add a TURN server.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
         children: [
+          Container(
+            margin: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.info_outline),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'This build runs the encrypted core locally (identity, '
+                    'verification, message UI). Live two-device delivery over '
+                    'STUN/TURN is the next integration step.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              ],
+            ),
+          ),
           const _SectionHeader('Network (STUN / TURN)'),
           ListTile(
             leading: const Icon(Icons.dns_outlined),
             title: const Text('ICE servers'),
-            subtitle: const Text(
-              'Defaults use public STUN. Override with your own STUN/TURN '
-              '(e.g. self-hosted coturn).',
-            ),
+            subtitle: const Text('Public STUN defaults; override with your own'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () {}, // TODO(phase 7): ICE server editor -> core settings
+            onTap: _showIceServers,
           ),
           SwitchListTile(
             secondary: const Icon(Icons.inbox_outlined),
             title: const Text('Offline relay (optional)'),
             subtitle: const Text(
-              'Off by default. When on, a self-hostable, content-blind mailbox '
-              'holds encrypted messages for offline delivery.',
+              'Off by default. A self-hostable, content-blind mailbox for '
+              'offline delivery.',
             ),
             value: _relayEnabled,
             onChanged: (v) => setState(() => _relayEnabled = v),

@@ -1,6 +1,5 @@
-/// Emoji shortcode expansion, mirroring core/pkg/emoji so message text can be
-/// composed with `:shortcode:` tokens. Static emoji render natively; animated
-/// emoji (Lottie/APNG/WebP) are referenced by id and resolved separately.
+/// Emoji helpers: `:shortcode:` expansion (mirrors core/pkg/emoji) and a small
+/// built-in picker set (avoids a native plugin dependency).
 library;
 
 const _shortcodes = <String, String>{
@@ -25,3 +24,12 @@ String expandShortcodes(String input) {
     return _shortcodes[m.group(1)] ?? m.group(0)!;
   });
 }
+
+/// A compact set of emoji for the in-app picker.
+const pickerEmojis = <String>[
+  '😀', '😄', '😁', '😂', '🙂', '😉', '😍', '😘',
+  '😎', '🤔', '😴', '😢', '😭', '😡', '🥳', '🤝',
+  '👍', '👎', '👏', '🙏', '👋', '💪', '🔥', '🎉',
+  '✨', '⭐', '❤️', '🧡', '💜', '💯', '🚀', '📎',
+  '🔒', '🗝️', '📝', '📷', '🎵', '☕', '🍕', '🌙',
+];
