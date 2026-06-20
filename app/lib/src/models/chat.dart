@@ -1,5 +1,5 @@
-/// UI-side models. These mirror parts of the Go core's messaging model
-/// (core/pkg/messaging) and are driven by [ChatStore].
+// UI-side models. These mirror parts of the Go core's messaging model
+// (core/pkg/messaging) and are driven by ChatStore.
 
 /// Delivery state of an outgoing message, mirroring messaging.DeliveryState.
 enum DeliveryStatus { sending, sent, delivered, read }
