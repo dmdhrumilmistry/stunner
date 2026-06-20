@@ -74,6 +74,20 @@ func StunnerValidateContactURI(uri *C.char) *C.char {
 	return C.CString(handle + "\t" + fp)
 }
 
+//export StunnerCheckSTUN
+func StunnerCheckSTUN() *C.char {
+	ok, addr, detail, err := core.CheckSTUN()
+	if err != nil {
+		return C.CString("error: " + err.Error())
+	}
+	// Returns "ok|fail\t<reflexiveAddr>\t<detail>"; the Dart side splits on tabs.
+	status := "fail"
+	if ok {
+		status = "ok"
+	}
+	return C.CString(status + "\t" + addr + "\t" + detail)
+}
+
 //export StunnerFree
 func StunnerFree(p *C.char) {
 	C.free(unsafe.Pointer(p))

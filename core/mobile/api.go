@@ -49,6 +49,23 @@ func ValidateContactURI(uri string) (*ContactInfo, error) {
 	return &ContactInfo{Handle: handle, Fingerprint: fingerprint}, nil
 }
 
+// STUNResult is the gobind-friendly result of CheckSTUN (one struct + error).
+type STUNResult struct {
+	OK            bool
+	ReflexiveAddr string
+	Detail        string
+}
+
+// CheckSTUN probes the default STUN servers and reports whether a public address
+// could be discovered — the app's "Test STUN connection" diagnostic.
+func CheckSTUN() (*STUNResult, error) {
+	ok, addr, detail, err := core.CheckSTUN()
+	if err != nil {
+		return nil, err
+	}
+	return &STUNResult{OK: ok, ReflexiveAddr: addr, Detail: detail}, nil
+}
+
 // EventHandler receives asynchronous events pushed from the core (incoming
 // messages, presence, transfer progress). gomobile turns this into a callback
 // interface the app implements. Wired up as the runtime is exposed over FFI.

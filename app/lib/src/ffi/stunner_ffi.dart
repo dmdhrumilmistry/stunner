@@ -10,6 +10,7 @@
 
 import 'dart:ffi';
 import 'dart:io';
+import 'dart:isolate';
 import 'package:ffi/ffi.dart';
 
 // C signatures.
@@ -31,8 +32,14 @@ typedef _SafetyDart = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>);
 typedef _ValidateC = Pointer<Utf8> Function(Pointer<Utf8>);
 typedef _ValidateDart = Pointer<Utf8> Function(Pointer<Utf8>);
 
+typedef _CheckStunC = Pointer<Utf8> Function();
+typedef _CheckStunDart = Pointer<Utf8> Function();
+
 typedef _FreeC = Void Function(Pointer<Utf8>);
 typedef _FreeDart = void Function(Pointer<Utf8>);
+
+/// Result of a STUN reachability probe (see [StunnerCore.checkStun]).
+typedef StunResult = ({bool ok, String reflexiveAddr, String detail});
 
 /// Thin wrapper over the native Stunner core.
 ///
@@ -188,4 +195,39 @@ class StunnerCore {
       malloc.free(arg);
     }
   }
+
+  /// Probes the default STUN servers and reports whether a public address could
+  /// be discovered. Runs in a background isolate so the (network-bound) probe
+  /// never blocks the UI thread.
+  Future<StunResult> checkStun() async {
+    if (!available) {
+      return (ok: false, reflexiveAddr: '', detail: 'core unavailable (build libstunner)');
+    }
+    try {
+      return await Isolate.run(_checkStunWorker);
+    } on Object catch (e) {
+      return (ok: false, reflexiveAddr: '', detail: 'STUN check failed: $e');
+    }
+  }
+}
+
+/// Runs the STUN probe inside a fresh isolate: re-opens the native library
+/// (isolates do not share FFI handles), invokes the export, and parses the
+/// `status\treflexiveAddr\tdetail` payload.
+StunResult _checkStunWorker() {
+  final lib = StunnerCore._load();
+  final check = lib.lookupFunction<_CheckStunC, _CheckStunDart>('StunnerCheckSTUN');
+  final free = lib.lookupFunction<_FreeC, _FreeDart>('StunnerFree');
+  final ptr = check();
+  final s = ptr.toDartString();
+  free(ptr);
+  if (s.startsWith('error: ')) {
+    return (ok: false, reflexiveAddr: '', detail: s.substring(7));
+  }
+  final parts = s.split('\t');
+  return (
+    ok: parts.isNotEmpty && parts[0] == 'ok',
+    reflexiveAddr: parts.length > 1 ? parts[1] : '',
+    detail: parts.length > 2 ? parts[2] : '',
+  );
 }
