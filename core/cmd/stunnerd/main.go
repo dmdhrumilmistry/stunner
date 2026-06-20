@@ -11,25 +11,133 @@ package main
 import (
 	"bytes"
 	"crypto/rand"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/dmdhrumilmistry/stunner/core/pkg/account"
 	"github.com/dmdhrumilmistry/stunner/core/pkg/core"
+	"github.com/dmdhrumilmistry/stunner/core/pkg/identity"
 	"github.com/dmdhrumilmistry/stunner/core/pkg/mailbox"
 	"github.com/dmdhrumilmistry/stunner/core/pkg/messaging"
 	"github.com/dmdhrumilmistry/stunner/core/pkg/node"
+	"github.com/dmdhrumilmistry/stunner/core/pkg/signaling"
 	"github.com/dmdhrumilmistry/stunner/core/pkg/storage"
 	"github.com/dmdhrumilmistry/stunner/core/pkg/transport"
 )
 
 func main() {
+	live := flag.Bool("live", false, "run the live two-device path over real WebRTC (loopback)")
+	flag.Parse()
+
 	fmt.Println(core.VersionString())
+	run := run
+	if *live {
+		run = runLive
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
+}
+
+// runLive demonstrates the real two-device delivery path: two nodes establish a
+// live pion WebRTC data channel (loopback, hermetic) negotiated via a signaler,
+// run the interactive handshake, and exchange E2E-encrypted messages directly
+// peer-to-peer. No message bytes pass through a server (pure P2P); STUN/TURN,
+// when configured, only help with NAT traversal.
+func runLive() error {
+	tmp, err := os.MkdirTemp("", "stunnerd-live-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+
+	alice, err := makeNode(tmp, "alice")
+	if err != nil {
+		return err
+	}
+	bob, err := makeNode(tmp, "bob")
+	if err != nil {
+		return err
+	}
+	fmt.Println("\nlive (WebRTC data channel) identities:")
+	fmt.Printf("  alice %s\n", alice.Account.Fingerprint())
+	fmt.Printf("  bob   %s\n", bob.Account.Fingerprint())
+
+	trA, err := transport.New(transport.Config{})
+	if err != nil {
+		return err
+	}
+	trB, err := transport.New(transport.Config{})
+	if err != nil {
+		return err
+	}
+	reg := signaling.NewRegistry()
+	sigA := reg.Join(alice.Account.Fingerprint())
+	sigB := reg.Join(bob.Account.Fingerprint())
+	salt := []byte("stunnerd-live")
+
+	type result struct {
+		link *node.Link
+		err  error
+	}
+	// Advertise Bob before Alice looks him up (removes the goroutine-start race;
+	// Listen re-advertises idempotently).
+	if err := sigB.Advertise(bobDiscoveryKey(bob, salt)); err != nil {
+		return err
+	}
+	bobCh := make(chan result, 1)
+	go func() {
+		l, err := bob.Listen(trB, sigB, salt)
+		bobCh <- result{l, err}
+	}()
+
+	linkA, err := alice.Connect(trA, sigA, bob.Account.Identity.SigningPub, salt)
+	if err != nil {
+		return fmt.Errorf("alice connect: %w", err)
+	}
+	defer linkA.Close()
+
+	var rb result
+	select {
+	case rb = <-bobCh:
+	case <-time.After(45 * time.Second):
+		return fmt.Errorf("bob listen timed out")
+	}
+	if rb.err != nil {
+		return fmt.Errorf("bob listen: %w", rb.err)
+	}
+	defer rb.link.Close()
+
+	if _, err := linkA.SendText(alice, "conv", "hello bob over webrtc 🎉🔒"); err != nil {
+		return err
+	}
+	env, err := rb.link.Receive()
+	if err != nil {
+		return err
+	}
+	body, _ := env.Text()
+	fmt.Printf("\nalice -> bob (live, E2E over data channel): %q\n", body.Text)
+
+	if _, err := rb.link.SendText(bob, "conv", "got it, fully P2P 👍"); err != nil {
+		return err
+	}
+	env, err = linkA.Receive()
+	if err != nil {
+		return err
+	}
+	body, _ = env.Text()
+	fmt.Printf("bob -> alice (live, E2E over data channel): %q\n", body.Text)
+
+	fmt.Println("\nlive two-device delivery OK (pure P2P)")
+	return nil
+}
+
+func bobDiscoveryKey(n *node.Node, salt []byte) []byte {
+	return identity.DiscoveryKey(n.Account.Identity.SigningPub, salt)
 }
 
 func run() error {

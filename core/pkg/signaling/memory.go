@@ -43,8 +43,9 @@ func (r *Registry) Join(peerID string) Signaler {
 }
 
 type memSignaler struct {
-	reg    *Registry
-	peerID string
+	reg        *Registry
+	peerID     string
+	lastRemote string // most recent peer we received from; reply target for ""
 }
 
 func (s *memSignaler) Advertise(discoveryKey []byte) error {
@@ -66,6 +67,11 @@ func (s *memSignaler) Find(discoveryKey []byte) (PeerInfo, error) {
 
 func (s *memSignaler) send(to, kind string, data []byte) error {
 	s.reg.mu.Lock()
+	// An empty target means "reply to whoever last contacted us" (the answerer
+	// replying to the offerer); the transport's Accept uses this.
+	if to == "" {
+		to = s.lastRemote
+	}
 	ch, ok := s.reg.mailbox[to]
 	s.reg.mu.Unlock()
 	if !ok {
@@ -81,6 +87,9 @@ func (s *memSignaler) recv(kind string) ([]byte, error) {
 	s.reg.mu.Unlock()
 	for f := range ch {
 		if f.kind == kind {
+			s.reg.mu.Lock()
+			s.lastRemote = f.from
+			s.reg.mu.Unlock()
 			return f.data, nil
 		}
 	}

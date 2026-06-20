@@ -50,11 +50,17 @@ func (e Envelope) Text() (TextBody, error) {
 	return t, err
 }
 
-// Frame is what travels over a transport.Conn: an optional X3DH handshake (only
-// on the first frame from an initiator) plus the ratchet-encrypted envelope.
+// Frame is what travels over a transport.Conn. It carries one of:
+//   - Bundle: the responder's prekey bundle, sent as the first frame of an
+//     interactive live handshake so the initiator can run X3DH without a prekey
+//     directory (see pkg/node live delivery);
+//   - Handshake: the initiator's X3DH handshake (first frame of the legacy
+//     bundle-known path, or the initiator's reply in the interactive handshake);
+//   - Payload: a ratchet-encrypted application envelope.
 type Frame struct {
-	Handshake *crypto.Handshake `json:"hs,omitempty"`
-	Payload   []byte            `json:"payload,omitempty"`
+	Bundle    *crypto.PreKeyBundle `json:"bundle,omitempty"`
+	Handshake *crypto.Handshake    `json:"hs,omitempty"`
+	Payload   []byte               `json:"payload,omitempty"`
 }
 
 // EncodeFrame serializes a frame for the wire.
