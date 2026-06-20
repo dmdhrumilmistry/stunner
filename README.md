@@ -95,6 +95,86 @@ flutter run            # pick a connected device / desktop target
 > instructions per platform (`gomobile bind`, `go build -buildmode=c-shared`)
 > are tracked in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
+## Testing locally
+
+Requires **Go 1.25+** (a recent toolchain is fetched automatically if needed).
+No services to stand up — the whole stack runs in-process.
+
+### Run the end-to-end demo
+
+`stunnerd` exercises the full pipeline between two in-process accounts: it
+generates encrypted identities, runs the X3DH + Double Ratchet handshake, sends
+an end-to-end-encrypted message and a file, prints the safety number, and
+delivers an offline message via the mailbox.
+
+```bash
+cd core
+go run ./cmd/stunnerd
+```
+
+Expected output (fingerprints/safety number vary per run):
+
+```
+Stunner core 0.2.0
+
+identities:
+  alice 4W7FN ZLHYK ...
+  bob   K5F7A QTQMG ...
+
+safety number (compare on both devices):
+  03592 30276 99571 54331 22262 49477 83291 67067 56552 55226 60948 57461
+
+alice -> bob (E2E): "hello bob 🎉🔒"
+file transfer: "secret.bin" (40960 bytes) integrity=true
+offline mailbox -> bob: "sent while you were offline 👋"
+
+all pipeline stages OK
+```
+
+### Run the test suite
+
+```bash
+cd core
+go test ./...                                   # all packages
+go test -race ./pkg/crypto/ ./pkg/node/         # race detector on the hot paths
+go vet ./... && gofmt -l .                       # vet + format check (no output = clean)
+```
+
+What the tests cover, by package:
+
+- `pkg/crypto` & `pkg/crypto/libsignal` — handshake + ratchet round-trips,
+  bidirectional traffic, out-of-order delivery, tamper rejection.
+- `pkg/transport` — a real `pion/webrtc` data-channel round-trip over loopback.
+- `pkg/signaling` — libp2p SDP exchange between two hosts.
+- `pkg/node` — two nodes exchange an encrypted message and a file; offline
+  delivery via the mailbox.
+- `pkg/account`, `pkg/storage`, `pkg/vault` — encrypted identity/store reload
+  with correct vs. wrong keys.
+- `pkg/safetynumber`, `pkg/contact`, `pkg/filetransfer`, `pkg/emoji` — units.
+
+The libp2p **DHT discovery** test is opt-in (its propagation timing is
+environment-sensitive):
+
+```bash
+STUNNER_DHT_TEST=1 go test ./pkg/signaling/ -run TestLibp2pDHTDiscovery
+```
+
+### Smoke-test the desktop FFI library
+
+```bash
+cd core
+go build -buildmode=c-shared -o /tmp/libstunner.so ./ffi   # .dylib on macOS, .dll on Windows
+```
+
+### Flutter app
+
+```bash
+cd app
+flutter pub get
+flutter analyze
+flutter test
+```
+
 ## Contributing
 
 Contributions welcome. Please read [`SECURITY.md`](SECURITY.md) before reporting
