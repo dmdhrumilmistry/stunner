@@ -108,6 +108,35 @@ and a way to find a peer's current endpoint. Stunner keeps this decentralized:
   is available for users who prefer it or who are on networks hostile to DHT
   traffic.
 
+### Live two-device delivery (the runtime path)
+
+`pkg/node` ties the above together into the path two online devices actually use,
+`Node.Connect` (initiator) and `Node.Listen` (responder):
+
+1. **Discover.** The responder advertises under its discovery key
+   (`identity.DiscoveryKey`); the initiator looks it up via the `Signaler`.
+2. **Negotiate transport.** The pion transport exchanges SDP over the signaler
+   (non-trickle ICE) and opens a WebRTC **data channel** directly between the two
+   devices.
+3. **Interactive handshake.** Because a contact's QR/URI carries only their
+   Ed25519 identity key — not a full prekey bundle — the responder sends its
+   `PreKeyBundle` as the first frame on the data channel. The initiator
+   **verifies the bundle is bound to the expected identity key** (aborting with
+   `ErrIdentityMismatch` otherwise — the MITM guard), runs X3DH, and replies with
+   the `Handshake`. No published prekey directory is required.
+4. **Talk.** Both sides now hold a Double Ratchet session and exchange
+   E2E-encrypted envelopes over the same channel.
+
+**This is pure P2P.** Application bytes flow node-to-node over the data channel
+and never pass through a server. STUN is used only to discover public addresses
+and punch holes; it never relays data. TURN relays bytes *only if* a direct path
+fails **and** a TURN server is configured — none is by default
+(`settings.DefaultICEServers` is STUN-only) — and even then it sees only
+ciphertext. The signaler carries SDP, not messages.
+
+The same logic is exercised hermetically over real pion WebRTC on loopback in
+`pkg/node` tests and via `stunnerd -live`.
+
 ## Offline delivery
 
 This is the central tradeoff of pure P2P and is called out explicitly:
