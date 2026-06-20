@@ -140,7 +140,11 @@ jobs:
           go tool gomobile init
           # -androidapi 21: NDK r26+ dropped API 16 (gomobile's default), which
           # fails with "unsupported API version 16 (not in 21..34)".
-          go tool gomobile bind -androidapi 21 -target=android -o stunnercore.aar ./mobile
+          # -ldflags=-checklinkname=0: the core now pulls in pion (via the STUN
+          # diagnostic), whose transitive dep github.com/wlynxg/anet uses
+          # //go:linkname to reach net.zoneCache on Android; Go 1.23+ blocks that
+          # unless the linkname check is disabled (anet's documented workaround).
+          go tool gomobile bind -androidapi 21 -ldflags=-checklinkname=0 -target=android -o stunnercore.aar ./mobile
           mkdir -p dist
           mv stunnercore.aar "dist/stunnercore_${GITHUB_REF_NAME}.aar"
       - name: Upload asset
@@ -197,8 +201,11 @@ jobs:
           jni="app/android/app/src/main/jniLibs"
           build() { # $1=abi $2=cc $3=goarch $4=goarm
             mkdir -p "$jni/$1"
+            # -ldflags=-checklinkname=0: pion's transitive dep wlynxg/anet uses
+            # //go:linkname to net.zoneCache on Android, which Go 1.23+ blocks
+            # unless the linkname check is disabled (anet's documented workaround).
             (cd core && CGO_ENABLED=1 GOOS=android GOARCH="$3" GOARM="$4" CC="$TC/$2" \
-              go build -buildmode=c-shared -o "../$jni/$1/libstunner.so" ./ffi)
+              go build -buildmode=c-shared -ldflags=-checklinkname=0 -o "../$jni/$1/libstunner.so" ./ffi)
           }
           build arm64-v8a   aarch64-linux-android21-clang    arm64 ""
           build armeabi-v7a armv7a-linux-androideabi21-clang arm   7
