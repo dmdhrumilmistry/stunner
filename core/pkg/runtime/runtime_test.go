@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -179,6 +180,31 @@ func mustTransport(t *testing.T) transport.Transport {
 		t.Fatal(err)
 	}
 	return tr
+}
+
+// TestRuntimeSettings round-trips a custom TURN server through the store.
+func TestRuntimeSettings(t *testing.T) {
+	key := bytes.Repeat([]byte{5}, 32)
+	acc, err := account.LoadOrCreate(t.TempDir(), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := storage.Open(storage.Options{Path: filepath.Join(t.TempDir(), "s.bin"), Key: key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := signaling.NewRegistry()
+	rt := StartWith(node.New(acc, st), mustTransport(t), reg.Join(acc.Fingerprint()), "h")
+	defer rt.Stop()
+
+	const cfg = `{"iceServers":[{"urls":["turn:turn.example.com:3478"],"username":"u","credential":"p"}],"appLock":"none"}`
+	if err := rt.SetSettings(cfg); err != nil {
+		t.Fatal(err)
+	}
+	got := rt.Settings()
+	if !strings.Contains(got, "turn:turn.example.com:3478") || !strings.Contains(got, `"username":"u"`) {
+		t.Errorf("settings did not round-trip: %s", got)
+	}
 }
 
 // TestRuntimeSendInvalidURI surfaces a sendFailed event for a malformed URI.

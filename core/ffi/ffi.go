@@ -65,6 +65,31 @@ func StunnerSend(peerURI, text, msgID *C.char) *C.char {
 	return C.CString("ok")
 }
 
+//export StunnerGetSettings
+func StunnerGetSettings() *C.char {
+	rtMu.Lock()
+	r := rt
+	rtMu.Unlock()
+	if r == nil {
+		return C.CString("{}")
+	}
+	return C.CString(r.Settings())
+}
+
+//export StunnerSetSettings
+func StunnerSetSettings(jsonSettings *C.char) *C.char {
+	rtMu.Lock()
+	r := rt
+	rtMu.Unlock()
+	if r == nil {
+		return C.CString("error: runtime not started")
+	}
+	if err := r.SetSettings(C.GoString(jsonSettings)); err != nil {
+		return C.CString("error: " + err.Error())
+	}
+	return C.CString("ok")
+}
+
 //export StunnerSaveState
 func StunnerSaveState(jsonState *C.char) *C.char {
 	rtMu.Lock()

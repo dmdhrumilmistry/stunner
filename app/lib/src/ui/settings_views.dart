@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import '../ffi/stunner_ffi.dart';
@@ -307,6 +309,105 @@ class _NetworkViewState extends State<NetworkView> {
   bool _running = false;
   StunResult? _result;
 
+  /// The full settings map (so we preserve non-ICE fields on save).
+  Map<String, dynamic> _settings = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+  }
+
+  void _loadSettings() {
+    if (!widget.core.available) return;
+    try {
+      _settings = jsonDecode(widget.core.getSettings()) as Map<String, dynamic>;
+    } on Object {
+      _settings = {};
+    }
+  }
+
+  List<Map<String, dynamic>> get _iceServers {
+    final raw = _settings['iceServers'];
+    if (raw is List) {
+      return raw.whereType<Map>().map((e) => e.cast<String, dynamic>()).toList();
+    }
+    return [];
+  }
+
+  List<String> _urlsOf(Map<String, dynamic> server) {
+    final u = server['urls'];
+    if (u is List) return u.whereType<String>().toList();
+    if (u is String) return [u];
+    return [];
+  }
+
+  void _saveServers(List<Map<String, dynamic>> servers) {
+    _settings['iceServers'] = servers;
+    widget.core.setSettings(jsonEncode(_settings));
+    setState(() {});
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Saved — applies after restarting the app.')),
+      );
+    }
+  }
+
+  Future<void> _addServer() async {
+    final urlCtl = TextEditingController();
+    final userCtl = TextEditingController();
+    final credCtl = TextEditingController();
+    final added = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Add STUN/TURN server'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: urlCtl,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'URL',
+                hintText: 'turn:turn.example.com:3478',
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: userCtl,
+              decoration: const InputDecoration(labelText: 'Username (TURN, optional)'),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: credCtl,
+              decoration: const InputDecoration(labelText: 'Credential (TURN, optional)'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Add')),
+        ],
+      ),
+    );
+    if (added != true) return;
+    final url = urlCtl.text.trim();
+    if (url.isEmpty) return;
+    final server = <String, dynamic>{
+      'urls': [url],
+      if (userCtl.text.trim().isNotEmpty) 'username': userCtl.text.trim(),
+      if (credCtl.text.trim().isNotEmpty) 'credential': credCtl.text.trim(),
+    };
+    _saveServers([..._iceServers, server]);
+  }
+
+  void _removeServer(int index) {
+    final servers = _iceServers;
+    if (index < 0 || index >= servers.length) return;
+    servers.removeAt(index);
+    _saveServers(servers);
+  }
+
   Future<void> _test() async {
     setState(() {
       _running = true;
@@ -373,13 +474,27 @@ class _NetworkViewState extends State<NetworkView> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const _IceLine('stun:stun.l.google.com:19302'),
-              const _IceLine('stun:stun1.l.google.com:19302'),
+              if (_iceServers.isEmpty)
+                const _IceLine('Using built-in public STUN defaults')
+              else
+                for (var i = 0; i < _iceServers.length; i++)
+                  _IceLine(
+                    _urlsOf(_iceServers[i]).join(', '),
+                    isTurn: _urlsOf(_iceServers[i]).any((u) => u.startsWith('turn')),
+                    onRemove: () => _removeServer(i),
+                  ),
               const SizedBox(height: 8),
               Text(
                 'Pure P2P uses STUN only for discovery; no message data passes '
-                'through it. Add a self-hosted TURN server for restrictive networks.',
+                'through it. Add a self-hosted TURN server for restrictive networks. '
+                'Changes apply after restarting the app.',
                 style: TextStyle(fontSize: 12, height: 1.4, color: scheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: widget.core.available ? _addServer : null,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Add STUN/TURN server'),
               ),
             ],
           ),
@@ -422,9 +537,11 @@ class _NetworkViewState extends State<NetworkView> {
 }
 
 class _IceLine extends StatelessWidget {
-  const _IceLine(this.url);
+  const _IceLine(this.url, {this.isTurn = false, this.onRemove});
 
   final String url;
+  final bool isTurn;
+  final VoidCallback? onRemove;
 
   @override
   Widget build(BuildContext context) {
@@ -433,12 +550,19 @@ class _IceLine extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         children: [
-          Icon(Icons.dns_outlined, size: 16, color: scheme.onSurfaceVariant),
+          Icon(isTurn ? Icons.swap_horiz : Icons.dns_outlined, size: 16, color: scheme.onSurfaceVariant),
           const SizedBox(width: 8),
           Expanded(
             child: Text(url,
                 style: const TextStyle(fontSize: 13, fontFamily: 'monospace')),
           ),
+          if (onRemove != null)
+            IconButton(
+              tooltip: 'Remove',
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.close, size: 16),
+              onPressed: onRemove,
+            ),
         ],
       ),
     );
