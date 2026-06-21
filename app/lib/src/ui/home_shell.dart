@@ -308,17 +308,18 @@ class _HomeShellState extends State<HomeShell> {
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
-                controller: nameCtl,
+                controller: codeCtl,
                 autofocus: true,
-                decoration: const InputDecoration(labelText: 'Name'),
+                decoration: const InputDecoration(
+                  labelText: 'Contact ID (required)',
+                  hintText: 'stunner:contact?...',
+                  helperText: 'Paste the code they shared from My identity.',
+                ),
               ),
               const SizedBox(height: 8),
               TextField(
-                controller: codeCtl,
-                decoration: const InputDecoration(
-                  labelText: 'Contact code (optional)',
-                  hintText: 'stunner:contact?...',
-                ),
+                controller: nameCtl,
+                decoration: const InputDecoration(labelText: 'Name (optional)'),
               ),
               if (error != null) ...[
                 const SizedBox(height: 8),
@@ -331,20 +332,22 @@ class _HomeShellState extends State<HomeShell> {
             FilledButton(
               onPressed: () {
                 final code = codeCtl.text.trim();
-                var fingerprint = '';
                 var name = nameCtl.text.trim();
-                if (code.isNotEmpty) {
-                  try {
-                    final info = core.validateContactURI(code);
-                    fingerprint = info.fingerprint;
-                    if (name.isEmpty) name = info.handle;
-                  } on FormatException catch (e) {
-                    setLocal(() => error = 'Invalid contact code: ${e.message}');
-                    return;
-                  }
+                if (code.isEmpty) {
+                  setLocal(() => error = 'Enter the contact ID (their stunner:contact code).');
+                  return;
                 }
-                if (name.isEmpty) {
-                  setLocal(() => error = 'Enter a name or a contact code.');
+                if (!core.available) {
+                  setLocal(() => error = 'Core library not loaded; cannot add contacts.');
+                  return;
+                }
+                late final String fingerprint;
+                try {
+                  final info = core.validateContactURI(code);
+                  fingerprint = info.fingerprint;
+                  if (name.isEmpty) name = info.handle.isEmpty ? 'Contact' : info.handle;
+                } on FormatException catch (e) {
+                  setLocal(() => error = 'Invalid contact ID: ${e.message}');
                   return;
                 }
                 Navigator.pop(ctx, store.addContact(name: name, code: code, fingerprint: fingerprint));

@@ -38,9 +38,15 @@ type DHTSignaler struct {
 
 	mu         sync.Mutex
 	lastRemote peer.ID
+	answers    map[peer.ID]chan []byte // per-peer answer queues (offerer side)
 
-	sdpIn  chan []byte
-	candIn chan []byte
+	offerIn chan dhtOffer // inbound offers (answerer side)
+	candIn  chan []byte
+}
+
+type dhtOffer struct {
+	from peer.ID
+	data []byte
 }
 
 // NewDHT creates a libp2p host (listening on listenAddrs, or an ephemeral
@@ -72,16 +78,43 @@ func NewDHT(ctx context.Context, listenAddrs ...string) (*DHTSignaler, error) {
 		return nil, err
 	}
 	s := &DHTSignaler{
-		ctx:    cctx,
-		cancel: cancel,
-		host:   h,
-		kad:    kad,
-		disc:   drouting.NewRoutingDiscovery(kad),
-		sdpIn:  make(chan []byte, 8),
-		candIn: make(chan []byte, 8),
+		ctx:     cctx,
+		cancel:  cancel,
+		host:    h,
+		kad:     kad,
+		disc:    drouting.NewRoutingDiscovery(kad),
+		answers: map[peer.ID]chan []byte{},
+		offerIn: make(chan dhtOffer, 8),
+		candIn:  make(chan []byte, 8),
 	}
 	h.SetStreamHandler(signalProtocol, s.onStream)
 	return s, nil
+}
+
+// BootstrapPublic connects to the public IPFS DHT bootstrap peers so discovery
+// works across the internet. Best-effort: individual dial failures are ignored.
+// Call after NewDHT for production (real cross-device) use.
+func (s *DHTSignaler) BootstrapPublic() {
+	var wg sync.WaitGroup
+	for _, ai := range dht.GetDefaultBootstrapPeerAddrInfos() {
+		wg.Add(1)
+		go func(info peer.AddrInfo) {
+			defer wg.Done()
+			_ = s.host.Connect(s.ctx, info)
+		}(ai)
+	}
+	wg.Wait()
+}
+
+func (s *DHTSignaler) answerChan(from peer.ID) chan []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ch, ok := s.answers[from]
+	if !ok {
+		ch = make(chan []byte, 8)
+		s.answers[from] = ch
+	}
+	return ch
 }
 
 // ID returns this node's libp2p peer ID (the peerID used by Send*/Recv*).
@@ -122,13 +155,36 @@ func (s *DHTSignaler) Find(discoveryKey []byte) (PeerInfo, error) {
 	return PeerInfo{}, errors.New("signaling: peer not found in DHT")
 }
 
+// SendSDP routes an offer (peerID != "") or an answer (peerID == "", to the peer
+// we last received an offer from), mirroring the transport's convention.
 func (s *DHTSignaler) SendSDP(peerID string, sdp []byte) error {
-	return s.sendStream(peerID, 's', sdp)
+	if peerID != "" {
+		return s.sendStream(peerID, 'o', sdp)
+	}
+	return s.sendStream("", 'a', sdp)
 }
 
-func (s *DHTSignaler) RecvSDP(string) ([]byte, error) {
+// RecvSDP returns the next inbound offer (peerID == "") or the answer from a
+// specific peer (peerID != ""). Separate queues keep a node that both listens
+// and connects from consuming the wrong message.
+func (s *DHTSignaler) RecvSDP(peerID string) ([]byte, error) {
+	if peerID == "" {
+		select {
+		case f := <-s.offerIn:
+			s.mu.Lock()
+			s.lastRemote = f.from
+			s.mu.Unlock()
+			return f.data, nil
+		case <-s.ctx.Done():
+			return nil, s.ctx.Err()
+		}
+	}
+	pid, err := peer.Decode(peerID)
+	if err != nil {
+		return nil, err
+	}
 	select {
-	case b := <-s.sdpIn:
+	case b := <-s.answerChan(pid):
 		return b, nil
 	case <-s.ctx.Done():
 		return nil, s.ctx.Err()
@@ -191,18 +247,24 @@ func (s *DHTSignaler) sendStream(peerID string, kind byte, data []byte) error {
 
 func (s *DHTSignaler) onStream(stream network.Stream) {
 	defer stream.Close()
-	s.mu.Lock()
-	s.lastRemote = stream.Conn().RemotePeer()
-	s.mu.Unlock()
+	remote := stream.Conn().RemotePeer()
 
 	kind, data, err := readFrame(stream)
 	if err != nil {
 		return
 	}
 	switch kind {
-	case 's':
+	case 'o': // offer
+		s.mu.Lock()
+		s.lastRemote = remote
+		s.mu.Unlock()
 		select {
-		case s.sdpIn <- data:
+		case s.offerIn <- dhtOffer{from: remote, data: data}:
+		case <-s.ctx.Done():
+		}
+	case 'a': // answer
+		select {
+		case s.answerChan(remote) <- data:
 		case <-s.ctx.Done():
 		}
 	case 'c':

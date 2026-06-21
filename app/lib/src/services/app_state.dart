@@ -42,15 +42,36 @@ class Prefs {
 /// A [ChangeNotifier] so any screen can react to edits immediately.
 class AppState extends ChangeNotifier {
   ThemeMode _themeMode = ThemeMode.system;
-  final Profile profile = Profile(
-    name: 'Riley Quinn',
-    username: '@rileyq',
-    status: 'Available',
-    email: 'riley@stunner.app',
-  );
+  final Profile profile = Profile(name: '', username: '', status: '', email: '');
   final Prefs prefs = Prefs();
 
+  /// Whether first-launch onboarding has been completed this session.
+  bool onboarded = false;
+
+  /// This device's shareable contact URI (set at onboarding when the runtime
+  /// starts). Share it so peers can add you.
+  String myContactCode = '';
+
   ThemeMode get themeMode => _themeMode;
+
+  /// Completes onboarding: stores the user-entered details and their contact
+  /// code, then reveals the app.
+  void completeOnboarding({
+    required String name,
+    String username = '',
+    String status = '',
+    String email = '',
+    String contactCode = '',
+  }) {
+    profile
+      ..name = name.trim()
+      ..username = username.trim()
+      ..status = status.trim().isEmpty ? 'Available' : status.trim()
+      ..email = email.trim();
+    myContactCode = contactCode;
+    onboarded = true;
+    notifyListeners();
+  }
 
   bool isDark(BuildContext context) {
     switch (_themeMode) {

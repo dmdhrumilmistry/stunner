@@ -98,7 +98,7 @@ func (n *Node) handshakeInitiator(conn transport.Conn, peerIdentity ed25519.Publ
 	if err := conn.Send(out); err != nil {
 		return nil, err
 	}
-	return &Link{conn: conn, session: session, peerFP: session.PeerFingerprint()}, nil
+	return &Link{conn: conn, session: session, peerFP: session.PeerFingerprint(), peerKey: peerIdentity}, nil
 }
 
 // handshakeResponder runs the responder side over an already-established conn:
@@ -127,5 +127,5 @@ func (n *Node) handshakeResponder(conn transport.Conn) (*Link, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Link{conn: conn, session: session, peerFP: session.PeerFingerprint()}, nil
+	return &Link{conn: conn, session: session, peerFP: session.PeerFingerprint(), peerKey: frame.Handshake.IdentitySign}, nil
 }

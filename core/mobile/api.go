@@ -9,7 +9,77 @@
 // See ../../docs/ROADMAP.md for the full build instructions.
 package mobile
 
-import "github.com/dmdhrumilmistry/stunner/core/pkg/core"
+import (
+	"encoding/json"
+	"sync"
+
+	"github.com/dmdhrumilmistry/stunner/core/pkg/core"
+	"github.com/dmdhrumilmistry/stunner/core/pkg/runtime"
+)
+
+// The messaging runtime is a process-global singleton driven from the app. All
+// calls are non-blocking; Poll drains incoming messages / status events as JSON.
+var (
+	rtMu sync.Mutex
+	rt   *runtime.Runtime
+)
+
+// StartResult is the gobind-friendly result of Start (one struct + error).
+type StartResult struct {
+	URI         string
+	Fingerprint string
+}
+
+// Start loads/creates the persistent account at dataDir and starts the live
+// messaging runtime (WebRTC + DHT). handle is the display name in the URI.
+func Start(dataDir, handle string) (*StartResult, error) {
+	rtMu.Lock()
+	defer rtMu.Unlock()
+	if rt == nil {
+		r, err := runtime.Start(dataDir, handle)
+		if err != nil {
+			return nil, err
+		}
+		rt = r
+	}
+	return &StartResult{URI: rt.MyURI(), Fingerprint: rt.Fingerprint()}, nil
+}
+
+// Send enqueues a text message to the peer identified by their contact URI.
+func Send(peerURI, text, msgID string) {
+	rtMu.Lock()
+	r := rt
+	rtMu.Unlock()
+	if r != nil {
+		r.Send(peerURI, text, msgID)
+	}
+}
+
+// Poll returns pending runtime events as a JSON array (empty "[]" if none).
+func Poll() string {
+	rtMu.Lock()
+	r := rt
+	rtMu.Unlock()
+	if r == nil {
+		return "[]"
+	}
+	b, err := json.Marshal(r.Poll())
+	if err != nil {
+		return "[]"
+	}
+	return string(b)
+}
+
+// Stop shuts down the runtime.
+func Stop() {
+	rtMu.Lock()
+	r := rt
+	rt = nil
+	rtMu.Unlock()
+	if r != nil {
+		_ = r.Stop()
+	}
+}
 
 // Version returns the core version string.
 func Version() string { return core.VersionString() }

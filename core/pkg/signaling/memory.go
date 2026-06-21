@@ -5,47 +5,91 @@ import (
 	"sync"
 )
 
-// Memory is an in-process Signaler used for tests and the headless harness. It
-// models discovery, SDP/ICE exchange, and presence without networking; the
+// Registry is an in-process Signaler fabric for tests and the headless harness.
+// It models discovery, SDP/ICE exchange, and presence without networking; the
 // libp2p DHT (NewDHT) is the production path. Nodes sharing the same *Registry
 // can discover and signal each other.
+//
+// SDP routing mirrors the transport's non-trickle convention: SendSDP with a
+// non-empty peerID is an OFFER to that peer; SendSDP("") is an ANSWER to the
+// peer we last received an offer from. RecvSDP("") returns the next inbound
+// offer (the answerer side); RecvSDP(peerID) returns the answer from peerID (the
+// offerer side). Offers and answers travel on separate queues so a node that
+// both listens and connects never consumes the wrong one.
 type Registry struct {
-	mu      sync.Mutex
-	advert  map[string]string           // discoveryKey(hex) -> peerID
-	online  map[string]bool             // peerID -> online
-	mailbox map[string]chan signalFrame // peerID -> inbox
+	mu     sync.Mutex
+	advert map[string]string // discoveryKey(hex) -> peerID
+	online map[string]bool   // peerID -> online
+	boxes  map[string]*inbox // peerID -> inbox
 }
 
-type signalFrame struct {
+type inbox struct {
+	offers  chan offerFrame
+	cands   chan []byte
+	mu      sync.Mutex
+	answers map[string]chan []byte // fromPeerID -> answer
+}
+
+type offerFrame struct {
 	from string
-	kind string // "sdp" | "candidate"
 	data []byte
+}
+
+func newInbox() *inbox {
+	return &inbox{
+		offers:  make(chan offerFrame, 16),
+		cands:   make(chan []byte, 16),
+		answers: map[string]chan []byte{},
+	}
+}
+
+func (b *inbox) answerChan(from string) chan []byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	ch, ok := b.answers[from]
+	if !ok {
+		ch = make(chan []byte, 8)
+		b.answers[from] = ch
+	}
+	return ch
 }
 
 // NewRegistry creates a shared in-process signaling fabric.
 func NewRegistry() *Registry {
 	return &Registry{
-		advert:  map[string]string{},
-		online:  map[string]bool{},
-		mailbox: map[string]chan signalFrame{},
+		advert: map[string]string{},
+		online: map[string]bool{},
+		boxes:  map[string]*inbox{},
 	}
+}
+
+func (r *Registry) box(peerID string) *inbox {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	b, ok := r.boxes[peerID]
+	if !ok {
+		b = newInbox()
+		r.boxes[peerID] = b
+	}
+	return b
 }
 
 // Join returns a Signaler for peerID bound to this registry.
 func (r *Registry) Join(peerID string) Signaler {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, ok := r.mailbox[peerID]; !ok {
-		r.mailbox[peerID] = make(chan signalFrame, 64)
+	if _, ok := r.boxes[peerID]; !ok {
+		r.boxes[peerID] = newInbox()
 	}
 	r.online[peerID] = true
+	r.mu.Unlock()
 	return &memSignaler{reg: r, peerID: peerID}
 }
 
 type memSignaler struct {
 	reg        *Registry
 	peerID     string
-	lastRemote string // most recent peer we received from; reply target for ""
+	mu         sync.Mutex
+	lastRemote string // peer we last received an offer from; reply target for ""
 }
 
 func (s *memSignaler) Advertise(discoveryKey []byte) error {
@@ -65,43 +109,54 @@ func (s *memSignaler) Find(discoveryKey []byte) (PeerInfo, error) {
 	return PeerInfo{PeerID: peerID, Addresses: []string{"inproc://" + peerID}}, nil
 }
 
-func (s *memSignaler) send(to, kind string, data []byte) error {
-	s.reg.mu.Lock()
-	// An empty target means "reply to whoever last contacted us" (the answerer
-	// replying to the offerer); the transport's Accept uses this.
-	if to == "" {
-		to = s.lastRemote
+// SendSDP routes an offer (peerID != "") or an answer (peerID == "").
+func (s *memSignaler) SendSDP(peerID string, sdp []byte) error {
+	data := append([]byte(nil), sdp...)
+	if peerID != "" {
+		s.reg.box(peerID).offers <- offerFrame{from: s.peerID, data: data}
+		return nil
 	}
-	ch, ok := s.reg.mailbox[to]
-	s.reg.mu.Unlock()
-	if !ok {
+	s.mu.Lock()
+	to := s.lastRemote
+	s.mu.Unlock()
+	if to == "" {
 		return ErrNotImplemented
 	}
-	ch <- signalFrame{from: s.peerID, kind: kind, data: append([]byte(nil), data...)}
+	s.reg.box(to).answerChan(s.peerID) <- data
 	return nil
 }
 
-func (s *memSignaler) recv(kind string) ([]byte, error) {
-	s.reg.mu.Lock()
-	ch := s.reg.mailbox[s.peerID]
-	s.reg.mu.Unlock()
-	for f := range ch {
-		if f.kind == kind {
-			s.reg.mu.Lock()
-			s.lastRemote = f.from
-			s.reg.mu.Unlock()
-			return f.data, nil
-		}
+// RecvSDP returns the next inbound offer (peerID == "") or the answer from a
+// specific peer (peerID != "").
+func (s *memSignaler) RecvSDP(peerID string) ([]byte, error) {
+	if peerID == "" {
+		f := <-s.reg.box(s.peerID).offers
+		s.mu.Lock()
+		s.lastRemote = f.from
+		s.mu.Unlock()
+		return f.data, nil
 	}
-	return nil, ErrNotImplemented
+	return <-s.reg.box(s.peerID).answerChan(peerID), nil
 }
 
-func (s *memSignaler) SendSDP(peerID string, sdp []byte) error { return s.send(peerID, "sdp", sdp) }
-func (s *memSignaler) RecvSDP(peerID string) ([]byte, error)   { return s.recv("sdp") }
 func (s *memSignaler) SendCandidate(peerID string, c []byte) error {
-	return s.send(peerID, "candidate", c)
+	data := append([]byte(nil), c...)
+	to := peerID
+	if to == "" {
+		s.mu.Lock()
+		to = s.lastRemote
+		s.mu.Unlock()
+		if to == "" {
+			return ErrNotImplemented
+		}
+	}
+	s.reg.box(to).cands <- data
+	return nil
 }
-func (s *memSignaler) RecvCandidate(peerID string) ([]byte, error) { return s.recv("candidate") }
+
+func (s *memSignaler) RecvCandidate(string) ([]byte, error) {
+	return <-s.reg.box(s.peerID).cands, nil
+}
 
 func (s *memSignaler) Presence(peerID string) (bool, error) {
 	s.reg.mu.Lock()

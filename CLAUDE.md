@@ -59,4 +59,4 @@ make release-tag TAG=v0.3.1   # (re)create & push a release tag at origin/main
 
 ## Workflow
 - Develop on a `claude/*` branch; open a PR to `main`; keep PRs focused.
-- The two-device **live** messaging path in the GUI still needs the production transport/signaling wired into the app runtime over FFI (next integration step). Today the GUI exercises the core locally; the full path is covered by Go tests and `stunnerd`.
+- The two-device **live** messaging path is wired end to end: `core/pkg/runtime` is a long-lived engine (persistent account + WebRTC + libp2p DHT) exposed over FFI (`StunnerStart/Send/Poll/MyURI/Stop`), and the app drives it via `app/lib/src/services/messaging_service.dart` (poll-based event bridge). It is verified hermetically in Go (two runtimes over pion loopback + in-process signaler); real cross-device delivery over the public DHT requires on-device verification (NAT/bootstrap) and is not exercised by CI.

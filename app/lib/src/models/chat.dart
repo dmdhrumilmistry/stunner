@@ -10,7 +10,7 @@ String initialsOf(String name) {
 }
 
 /// Delivery state of an outgoing message, mirroring messaging.DeliveryState.
-enum DeliveryStatus { sending, sent, delivered, read }
+enum DeliveryStatus { sending, sent, delivered, read, failed }
 
 /// A person you can message. `code` is their `stunner:contact` URI (from a QR
 /// code); `fingerprint` is derived from it for verification. The remaining
@@ -31,7 +31,7 @@ class Contact {
 
   final String id;
   String name;
-  final String code;
+  String code;
   final String fingerprint;
   String role;
   String email;

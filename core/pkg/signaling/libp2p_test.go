@@ -40,9 +40,10 @@ func TestLibp2pSDPExchange(t *testing.T) {
 		t.Fatalf("send offer: %v", err)
 	}
 
-	// B replies to the most recent remote (A) with an empty peerID.
+	// B replies to the most recent remote (A) with an empty peerID; A (the
+	// offerer) reads the answer addressed to B's peer ID, as the transport does.
 	go func() { errc <- b.SendSDP("", []byte("answer-sdp")) }()
-	answer, err := a.RecvSDP("")
+	answer, err := a.RecvSDP(b.ID())
 	if err != nil || string(answer) != "answer-sdp" {
 		t.Fatalf("recv answer: %v %q", err, answer)
 	}

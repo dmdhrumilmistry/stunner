@@ -9,6 +9,7 @@
 package node
 
 import (
+	"crypto/ed25519"
 	"errors"
 
 	"github.com/dmdhrumilmistry/stunner/core/pkg/account"
@@ -41,10 +42,16 @@ type Link struct {
 	conn    transport.Conn
 	session crypto.Session
 	peerFP  string
+	peerKey ed25519.PublicKey
 }
 
 // PeerFingerprint returns the connected peer's identity fingerprint.
 func (l *Link) PeerFingerprint() string { return l.peerFP }
+
+// PeerIdentityKey returns the connected peer's Ed25519 identity public key,
+// learned during the handshake. It lets a responder reconstruct the peer's
+// contact URI so an inbound-only peer can be replied to and saved.
+func (l *Link) PeerIdentityKey() ed25519.PublicKey { return l.peerKey }
 
 // Close tears down the link.
 func (l *Link) Close() error { return l.conn.Close() }
@@ -63,7 +70,7 @@ func (n *Node) Dial(conn transport.Conn, bundle crypto.PreKeyBundle) (*Link, err
 	if err := conn.Send(frame); err != nil {
 		return nil, err
 	}
-	return &Link{conn: conn, session: session, peerFP: session.PeerFingerprint()}, nil
+	return &Link{conn: conn, session: session, peerFP: session.PeerFingerprint(), peerKey: bundle.IdentitySign}, nil
 }
 
 // Accept receives an incoming handshake frame on conn and establishes a session.
@@ -83,7 +90,7 @@ func (n *Node) Accept(conn transport.Conn) (*Link, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Link{conn: conn, session: session, peerFP: session.PeerFingerprint()}, nil
+	return &Link{conn: conn, session: session, peerFP: session.PeerFingerprint(), peerKey: frame.Handshake.IdentitySign}, nil
 }
 
 // SendEnvelope encrypts and sends an application envelope, persisting it to the
