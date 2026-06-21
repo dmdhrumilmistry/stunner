@@ -22,10 +22,86 @@ package main
 import "C"
 
 import (
+	"encoding/json"
+	"sync"
 	"unsafe"
 
 	"github.com/dmdhrumilmistry/stunner/core/pkg/core"
+	"github.com/dmdhrumilmistry/stunner/core/pkg/runtime"
 )
+
+// The messaging runtime is a process-global singleton driven over FFI. All
+// exported calls are non-blocking: sends enqueue, and the Dart side polls
+// StunnerPoll for incoming messages / status events.
+var (
+	rtMu sync.Mutex
+	rt   *runtime.Runtime
+)
+
+//export StunnerStart
+func StunnerStart(dataDir, handle *C.char) *C.char {
+	rtMu.Lock()
+	defer rtMu.Unlock()
+	if rt == nil {
+		r, err := runtime.Start(C.GoString(dataDir), C.GoString(handle))
+		if err != nil {
+			return C.CString("error: " + err.Error())
+		}
+		rt = r
+	}
+	// Returns "contactURI\tfingerprint".
+	return C.CString(rt.MyURI() + "\t" + rt.Fingerprint())
+}
+
+//export StunnerSend
+func StunnerSend(peerURI, text, msgID *C.char) *C.char {
+	rtMu.Lock()
+	r := rt
+	rtMu.Unlock()
+	if r == nil {
+		return C.CString("error: runtime not started")
+	}
+	r.Send(C.GoString(peerURI), C.GoString(text), C.GoString(msgID))
+	return C.CString("ok")
+}
+
+//export StunnerPoll
+func StunnerPoll() *C.char {
+	rtMu.Lock()
+	r := rt
+	rtMu.Unlock()
+	if r == nil {
+		return C.CString("[]")
+	}
+	b, err := json.Marshal(r.Poll())
+	if err != nil {
+		return C.CString("[]")
+	}
+	return C.CString(string(b))
+}
+
+//export StunnerMyURI
+func StunnerMyURI() *C.char {
+	rtMu.Lock()
+	r := rt
+	rtMu.Unlock()
+	if r == nil {
+		return C.CString("")
+	}
+	return C.CString(r.MyURI())
+}
+
+//export StunnerStop
+func StunnerStop() *C.char {
+	rtMu.Lock()
+	r := rt
+	rt = nil
+	rtMu.Unlock()
+	if r != nil {
+		_ = r.Stop()
+	}
+	return C.CString("ok")
+}
 
 //export StunnerVersion
 func StunnerVersion() *C.char {
