@@ -476,6 +476,8 @@ class _ReceiptTick extends StatelessWidget {
         return Icon(Icons.done_all, size: 14, color: muted);
       case DeliveryStatus.read:
         return const Icon(Icons.done_all, size: 14, color: AppTheme.read);
+      case DeliveryStatus.failed:
+        return Icon(Icons.error_outline, size: 14, color: Theme.of(context).colorScheme.error);
     }
   }
 }

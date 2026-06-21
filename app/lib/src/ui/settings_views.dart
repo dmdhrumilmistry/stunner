@@ -493,7 +493,8 @@ class PrivacyView extends StatelessWidget {
             SettingsCard(children: [
               InkWell(
                 onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(builder: (_) => MyIdentityScreen(core: core)),
+                  MaterialPageRoute<void>(
+                      builder: (_) => MyIdentityScreen(core: core, myCode: appState.myContactCode)),
                 ),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),

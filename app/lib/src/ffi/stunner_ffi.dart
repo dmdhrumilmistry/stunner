@@ -35,6 +35,15 @@ typedef _ValidateDart = Pointer<Utf8> Function(Pointer<Utf8>);
 typedef _CheckStunC = Pointer<Utf8> Function();
 typedef _CheckStunDart = Pointer<Utf8> Function();
 
+typedef _StartC = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>);
+typedef _StartDart = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>);
+
+typedef _SendC = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
+typedef _SendDart = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
+
+typedef _NoArgStrC = Pointer<Utf8> Function();
+typedef _NoArgStrDart = Pointer<Utf8> Function();
+
 typedef _FreeC = Void Function(Pointer<Utf8>);
 typedef _FreeDart = void Function(Pointer<Utf8>);
 
@@ -66,6 +75,16 @@ class StunnerCore {
       _lib!.lookupFunction<_SafetyC, _SafetyDart>('StunnerSafetyNumber');
   late final _ValidateDart _validate = _lib!
       .lookupFunction<_ValidateC, _ValidateDart>('StunnerValidateContactURI');
+  late final _StartDart _start =
+      _lib!.lookupFunction<_StartC, _StartDart>('StunnerStart');
+  late final _SendDart _send =
+      _lib!.lookupFunction<_SendC, _SendDart>('StunnerSend');
+  late final _NoArgStrDart _poll =
+      _lib!.lookupFunction<_NoArgStrC, _NoArgStrDart>('StunnerPoll');
+  late final _NoArgStrDart _myUri =
+      _lib!.lookupFunction<_NoArgStrC, _NoArgStrDart>('StunnerMyURI');
+  late final _NoArgStrDart _stop =
+      _lib!.lookupFunction<_NoArgStrC, _NoArgStrDart>('StunnerStop');
   late final _FreeDart _free =
       _lib!.lookupFunction<_FreeC, _FreeDart>('StunnerFree');
 
@@ -208,6 +227,71 @@ class StunnerCore {
     } on Object catch (e) {
       return (ok: false, reflexiveAddr: '', detail: 'STUN check failed: $e');
     }
+  }
+
+  // --- live messaging runtime ---
+  //
+  // These drive the process-global Go runtime and must all run on the isolate
+  // that loaded the library (the main isolate). They are non-blocking: sends
+  // enqueue, and [pollEvents] drains queued incoming-message / status events.
+
+  /// Starts the messaging runtime with a persistent account under [dataDir],
+  /// embedding [handle] in the shareable contact URI. Returns the URI +
+  /// fingerprint, or an error string.
+  ({String uri, String fingerprint, String? error}) startRuntime(String dataDir, String handle) {
+    if (!available) return (uri: '', fingerprint: '', error: 'core unavailable (build libstunner)');
+    final a = dataDir.toNativeUtf8();
+    final b = handle.toNativeUtf8();
+    try {
+      final ptr = _start(a, b);
+      final s = ptr.toDartString();
+      _free(ptr);
+      if (s.startsWith('error: ')) return (uri: '', fingerprint: '', error: s.substring(7));
+      final parts = s.split('\t');
+      return (uri: parts.first, fingerprint: parts.length > 1 ? parts[1] : '', error: null);
+    } finally {
+      malloc.free(a);
+      malloc.free(b);
+    }
+  }
+
+  /// Enqueues a text message to the peer at [peerUri]. Returns immediately.
+  void sendMessage(String peerUri, String text, String msgId) {
+    if (!available) return;
+    final a = peerUri.toNativeUtf8();
+    final b = text.toNativeUtf8();
+    final c = msgId.toNativeUtf8();
+    try {
+      _free(_send(a, b, c));
+    } finally {
+      malloc.free(a);
+      malloc.free(b);
+      malloc.free(c);
+    }
+  }
+
+  /// Drains pending runtime events as a JSON array string ("[]" if none).
+  String pollEvents() {
+    if (!available) return '[]';
+    final ptr = _poll();
+    final s = ptr.toDartString();
+    _free(ptr);
+    return s;
+  }
+
+  /// The account's shareable contact URI (empty until the runtime is started).
+  String runtimeUri() {
+    if (!available) return '';
+    final ptr = _myUri();
+    final s = ptr.toDartString();
+    _free(ptr);
+    return s;
+  }
+
+  /// Stops the runtime.
+  void stopRuntime() {
+    if (!available) return;
+    _free(_stop());
   }
 }
 

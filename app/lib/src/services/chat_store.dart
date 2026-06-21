@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 
 import '../models/chat.dart';
@@ -10,26 +8,19 @@ import 'notification_service.dart';
 /// (WebRTC over STUN/TURN via the Go core) is wired over FFI in a later step.
 ///
 /// The app starts empty — add a contact to begin. Incoming messages flow through
-/// [receiveText], which raises an in-app notification via [notifications].
+/// [receiveFromPeer], which raises an in-app notification via [notifications].
 class ChatStore extends ChangeNotifier {
   ChatStore({this.notifications});
 
   /// Optional sink for in-app live notifications on incoming messages.
   final NotificationService? notifications;
 
+  /// Outbound hook wired by the messaging runtime: (peerContactUri, text, msgId).
+  /// When null (runtime not started) sends are marked failed.
+  void Function(String peerUri, String text, String msgId)? onSend;
+
   final List<Contact> _contacts = [];
   final List<Chat> _chats = [];
-
-  // A few canned peer replies so the demo can exercise the live-notification
-  // path until the GUI is wired to the real runtime over FFI.
-  static const _demoReplies = [
-    'Got it 👍',
-    'Sounds good!',
-    'On it 🔒',
-    'Thanks for the update',
-    'Let me check and get back to you',
-  ];
-  int _replyCursor = 0;
 
   List<Contact> get contacts => List.unmodifiable(_contacts);
   List<Chat> get chats => List.unmodifiable(_chats);
@@ -55,8 +46,8 @@ class ChatStore extends ChangeNotifier {
   // --- contacts ---
 
   /// Adds (or updates) a contact and returns it. Deduplicated by fingerprint
-  /// when present, otherwise by name. New contacts are marked online so the demo
-  /// can exercise live delivery; real presence arrives with the FFI runtime.
+  /// when present, otherwise by name. Presence is unknown until the runtime
+  /// reports it, so new contacts start offline.
   Contact addContact({
     required String name,
     String code = '',
@@ -68,9 +59,11 @@ class ChatStore extends ChangeNotifier {
         (fingerprint.isNotEmpty && c.fingerprint == fingerprint) ||
         (fingerprint.isEmpty && c.name == cleanName));
     if (existing.isNotEmpty) {
-      existing.first.name = cleanName;
+      final c = existing.first;
+      c.name = cleanName;
+      if (code.isNotEmpty) c.code = code;
       notifyListeners();
-      return existing.first;
+      return c;
     }
     final contact = Contact(
       id: fingerprint.isNotEmpty ? fingerprint : 'k-${DateTime.now().microsecondsSinceEpoch}',
@@ -78,7 +71,6 @@ class ChatStore extends ChangeNotifier {
       code: code,
       fingerprint: fingerprint,
       role: role,
-      online: true,
     );
     _contacts.add(contact);
     notifyListeners();
@@ -154,13 +146,15 @@ class ChatStore extends ChangeNotifier {
     }
   }
 
-  /// Sends a text and simulates delivery + read receipts (local demo). If the
-  /// peer is online, a demo reply arrives shortly after to exercise the
-  /// live-notification path.
+  /// Sends a text over the live runtime via [onSend]. The message starts as
+  /// "sending"; the runtime later reports "sent" or "failed" (see [markSent] /
+  /// [markFailed]). If no runtime is wired or the peer has no contact ID, the
+  /// message is marked failed immediately.
   void sendText(String chatId, String text) {
     final body = text.trim();
     if (body.isEmpty) return;
     final chat = chatById(chatId);
+    final contact = contactForChat(chat);
     final msg = Message(
       id: 'local-${DateTime.now().microsecondsSinceEpoch}',
       text: body,
@@ -171,23 +165,57 @@ class ChatStore extends ChangeNotifier {
     _moveToTop(chat);
     notifyListeners();
 
-    _advance(msg, DeliveryStatus.sent, 150);
-    _advance(msg, DeliveryStatus.delivered, 700);
-    _advance(msg, DeliveryStatus.read, 1600);
-
-    final contact = contactForChat(chat);
-    if (contact != null && contact.online && !contact.blocked) {
-      final reply = _demoReplies[_replyCursor++ % _demoReplies.length];
-      Future.delayed(const Duration(milliseconds: 2400), () => receiveText(chatId, reply));
+    final uri = contact?.code ?? '';
+    if (onSend != null && uri.isNotEmpty) {
+      onSend!(uri, body, msg.id);
+    } else {
+      msg.status = DeliveryStatus.failed;
+      notifyListeners();
     }
   }
 
-  /// Delivers an incoming message into a conversation, bumping its unread count
-  /// and raising an in-app notification. This is the hook the live FFI runtime
-  /// will call for real peer messages.
-  void receiveText(String chatId, String text) {
-    final chat = maybeChat(chatId);
-    if (chat == null) return;
+  /// Marks an outgoing message (by id) as delivered/sent.
+  void markSent(String msgId) => _setStatus(msgId, DeliveryStatus.sent);
+
+  /// Marks an outgoing message (by id) as failed.
+  void markFailed(String msgId) => _setStatus(msgId, DeliveryStatus.failed);
+
+  void _setStatus(String msgId, DeliveryStatus status) {
+    for (final c in _chats) {
+      for (final m in c.messages) {
+        if (m.id == msgId) {
+          m.status = status;
+          notifyListeners();
+          return;
+        }
+      }
+    }
+  }
+
+  /// Updates a contact's presence from a runtime event.
+  void setPresence(String peerFingerprint, bool online) {
+    final c = contactById(peerFingerprint);
+    if (c != null && c.online != online) {
+      c.online = online;
+      notifyListeners();
+    }
+  }
+
+  /// Delivers an incoming message from a peer (identified by fingerprint), into
+  /// its conversation — creating the contact/chat if this peer is new — and
+  /// raises an in-app notification. [peerUri] (when present) makes an
+  /// inbound-only peer repliable.
+  void receiveFromPeer(String peerFingerprint, String peerUri, String text) {
+    if (peerFingerprint.isEmpty) return;
+    var contact = contactById(peerFingerprint);
+    if (contact == null) {
+      final tag = peerFingerprint.length <= 5 ? peerFingerprint : peerFingerprint.substring(0, 5);
+      contact = addContact(name: 'Contact $tag', code: peerUri, fingerprint: peerFingerprint);
+    }
+    if (contact.code.isEmpty && peerUri.isNotEmpty) contact.code = peerUri;
+
+    final chatId = startChatWith(contact);
+    final chat = chatById(chatId);
     chat.messages.add(Message(
       id: 'in-${DateTime.now().microsecondsSinceEpoch}',
       text: text,
@@ -197,19 +225,9 @@ class ChatStore extends ChangeNotifier {
     _moveToTop(chat);
     notifyListeners();
 
-    final contact = contactForChat(chat);
-    if (contact == null || !contact.muted) {
+    if (!contact.muted) {
       notifications?.push(title: chat.name, body: text, chatId: chatId);
     }
-  }
-
-  void _advance(Message m, DeliveryStatus to, int ms) {
-    Future.delayed(Duration(milliseconds: ms), () {
-      if (m.status.index < to.index) {
-        m.status = to;
-        notifyListeners();
-      }
-    });
   }
 
   void markRead(String chatId) {
