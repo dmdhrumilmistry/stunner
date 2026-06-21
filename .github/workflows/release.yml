@@ -193,6 +193,11 @@ jobs:
             sed -i -E 's/compileSdk(Version)?[ =]+[0-9]+/compileSdk = 36/' "$f"
           done
           echo "android.suppressUnsupportedCompileSdk=36" >> android/gradle.properties
+      - name: Configure network permissions
+        shell: bash
+        # Release APKs lack the INTERNET permission Flutter only grants debug
+        # builds; without it WebRTC/STUN gathers zero ICE candidates.
+        run: bash scripts/setup-app-permissions.sh app
       - name: Build Go core for Android ABIs (jniLibs)
         shell: bash
         run: |
@@ -263,6 +268,10 @@ jobs:
         working-directory: app
         shell: bash
         run: flutter create --platforms=${{ matrix.platform }} .
+      - name: Configure network permissions
+        shell: bash
+        # The sandboxed macOS app needs network entitlements (no-op elsewhere).
+        run: bash scripts/setup-app-permissions.sh app
       - name: Build Go core (c-shared)
         working-directory: core
         shell: bash

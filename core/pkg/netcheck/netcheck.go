@@ -35,7 +35,8 @@ func (r Result) Detail() string {
 		return "STUN reachable — public address " + r.ReflexiveAddr
 	}
 	if len(r.CandidateTypes) == 0 {
-		return "No ICE candidates gathered; check your network."
+		return "No ICE candidates gathered. Check network connectivity and that " +
+			"the app has network permission (Android INTERNET / macOS network entitlement)."
 	}
 	return "STUN did not respond (only local candidates). A direct P2P path may " +
 		"require a TURN server on restrictive networks."
