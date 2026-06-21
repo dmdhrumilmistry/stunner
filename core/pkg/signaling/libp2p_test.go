@@ -56,6 +56,36 @@ func TestLibp2pSDPExchange(t *testing.T) {
 	}
 }
 
+// TestDHTAdvertiseDedup verifies repeated Advertise calls for the same discovery
+// key start only one background re-advertise loop (guarding against the
+// goroutine leak from calling discovery/util.Advertise once per accept/tick).
+func TestDHTAdvertiseDedup(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s, err := NewDHT(ctx)
+	if err != nil {
+		t.Fatalf("new dht: %v", err)
+	}
+	defer s.Close()
+
+	key := []byte("dedup-key")
+	for i := 0; i < 5; i++ {
+		if err := s.Advertise(key); err != nil {
+			t.Fatalf("advertise %d: %v", i, err)
+		}
+	}
+	if err := s.Advertise([]byte("other-key")); err != nil {
+		t.Fatalf("advertise other: %v", err)
+	}
+
+	s.mu.Lock()
+	n := len(s.advertised)
+	s.mu.Unlock()
+	if n != 2 {
+		t.Fatalf("advertised loops = %d, want 2 (one per distinct key)", n)
+	}
+}
+
 // TestLibp2pDHTDiscovery exercises advertise/find over the Kademlia DHT. It is
 // opt-in (set STUNNER_DHT_TEST=1) because content-routing propagation timing in
 // a tiny two-node DHT is environment-sensitive and can be slow.
