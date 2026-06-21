@@ -97,17 +97,17 @@ class ChatStore extends ChangeNotifier {
 
   void _onEvent(CoreEvent ev) {
     switch (ev) {
-      case IncomingMessage m:
+      case final IncomingMessage m:
         final chat = _ensureChat(m.peerFp);
         _appendMessage(m.peerFp, Message(id: m.msgId, text: m.text, fromMe: false));
         chat.lastMessage = m.text;
         chat.unread += 1;
-      case PeerConnected c:
+      case final PeerConnected c:
         _ensureChat(c.peerFp).connected = true;
-      case PeerDisconnected d:
+      case final PeerDisconnected d:
         final chat = _chats[d.peerFp];
         if (chat != null) chat.connected = false;
-      case CoreError e:
+      case final CoreError e:
         lastError = e.message;
     }
     notifyListeners();
