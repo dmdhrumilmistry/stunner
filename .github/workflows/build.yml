@@ -9,6 +9,10 @@ name: Build
 # at runtime, so it isn't needed to compile the app).
 
 on:
+  # Manual trigger: run the full app build (APK + desktop) on demand against any
+  # branch, e.g. to verify a core-only change still builds the apps, without
+  # cutting a release. `gh workflow run build.yml --ref <branch>`.
+  workflow_dispatch:
   push:
     branches: [main]
     paths: ["app/**", "scripts/setup-app-permissions.sh", ".github/workflows/build.yml"]
