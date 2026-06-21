@@ -55,6 +55,28 @@ func Send(peerURI, text, msgID string) {
 	}
 }
 
+// GetSettings returns current settings (STUN/TURN etc.) as JSON.
+func GetSettings() string {
+	rtMu.Lock()
+	r := rt
+	rtMu.Unlock()
+	if r == nil {
+		return "{}"
+	}
+	return r.Settings()
+}
+
+// SetSettings persists user settings; ICE changes apply on next start.
+func SetSettings(jsonSettings string) error {
+	rtMu.Lock()
+	r := rt
+	rtMu.Unlock()
+	if r == nil {
+		return nil
+	}
+	return r.SetSettings(jsonSettings)
+}
+
 // SaveState persists an opaque app-state blob into the encrypted store.
 func SaveState(jsonState string) error {
 	rtMu.Lock()

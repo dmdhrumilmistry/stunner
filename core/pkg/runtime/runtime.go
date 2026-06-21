@@ -108,7 +108,10 @@ func Start(dataDir, handle string) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	tr, err := transport.New(transport.Config{ICEServers: settings.DefaultICEServers()})
+	// Use the user's configured STUN/TURN servers (e.g. a self-hosted coturn),
+	// falling back to the public defaults when unset.
+	st, _ := store.LoadSettings()
+	tr, err := transport.New(transport.Config{ICEServers: st.EffectiveICEServers()})
 	if err != nil {
 		return nil, err
 	}
@@ -170,6 +173,35 @@ func (r *Runtime) SendFile(peerURI, path, msgID string) {
 	case r.outbox <- outReq{peerURI: peerURI, filePath: path, msgID: msgID}:
 	case <-r.closeCh:
 	}
+}
+
+// Settings returns the current settings (STUN/TURN servers etc.) as JSON,
+// falling back to defaults when none are stored.
+func (r *Runtime) Settings() string {
+	s := settings.Default()
+	if r.node.Store != nil {
+		if loaded, err := r.node.Store.LoadSettings(); err == nil {
+			s = loaded
+		}
+	}
+	b, err := s.JSON()
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+
+// SetSettings persists user settings (e.g. a custom TURN server). ICE-server
+// changes take effect on the next runtime start (the transport is built once).
+func (r *Runtime) SetSettings(jsonSettings string) error {
+	if r.node.Store == nil {
+		return nil
+	}
+	s, err := settings.FromJSON([]byte(jsonSettings))
+	if err != nil {
+		return err
+	}
+	return r.node.Store.SaveSettings(s)
 }
 
 // SaveState persists an opaque app-state blob (contacts, chat history, profile)

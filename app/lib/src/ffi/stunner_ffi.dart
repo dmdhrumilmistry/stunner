@@ -96,6 +96,10 @@ class StunnerCore {
       _lib!.lookupFunction<_OneStrC, _OneStrDart>('StunnerSaveState');
   late final _NoArgStrDart _loadState =
       _lib!.lookupFunction<_NoArgStrC, _NoArgStrDart>('StunnerLoadState');
+  late final _NoArgStrDart _getSettings =
+      _lib!.lookupFunction<_NoArgStrC, _NoArgStrDart>('StunnerGetSettings');
+  late final _OneStrDart _setSettings =
+      _lib!.lookupFunction<_OneStrC, _OneStrDart>('StunnerSetSettings');
   late final _FreeDart _free =
       _lib!.lookupFunction<_FreeC, _FreeDart>('StunnerFree');
 
@@ -343,6 +347,27 @@ class StunnerCore {
     final s = ptr.toDartString();
     _free(ptr);
     return s;
+  }
+
+  /// Returns current settings (STUN/TURN servers etc.) as JSON ("{}" if none).
+  String getSettings() {
+    if (!available) return '{}';
+    final ptr = _getSettings();
+    final s = ptr.toDartString();
+    _free(ptr);
+    return s;
+  }
+
+  /// Persists settings JSON (e.g. custom TURN servers). ICE changes apply on the
+  /// next runtime start.
+  void setSettings(String json) {
+    if (!available) return;
+    final a = json.toNativeUtf8();
+    try {
+      _free(_setSettings(a));
+    } finally {
+      malloc.free(a);
+    }
   }
 
   /// Stops the runtime.
