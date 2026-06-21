@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:path_provider/path_provider.dart';
 
 import '../ffi/stunner_ffi.dart';
+import 'app_state.dart';
 import 'chat_store.dart';
 
 /// Bridges the Go live-messaging runtime (over FFI) to the [ChatStore].
@@ -20,12 +21,62 @@ class MessagingService {
   final ChatStore store;
 
   Timer? _timer;
+  Timer? _saveTimer;
   bool _started = false;
+  bool _restoring = false;
+  AppState? _appState;
 
   /// This device's shareable contact URI (set after a successful [start]).
   String myContactUri = '';
 
   bool get started => _started;
+
+  /// Boots the runtime, restores any persisted state into [store]/[appState],
+  /// and starts auto-saving on change. Call once at app launch. After it
+  /// completes, [AppState.onboarded] reflects whether a returning user was
+  /// restored (true) or first-run onboarding is needed (false).
+  Future<void> bootstrap(AppState appState) async {
+    _appState = appState;
+    final res = await start(''); // identity comes from the persistent account
+    if (!res.ok) return; // degraded (no native core): show onboarding
+
+    appState.myContactCode = res.uri;
+    final raw = core.loadState();
+    if (raw.isNotEmpty) {
+      try {
+        final map = jsonDecode(raw) as Map<String, dynamic>;
+        _restoring = true;
+        if (map['app'] is Map) {
+          appState.restoreFromMap((map['app'] as Map).cast<String, dynamic>());
+        }
+        if (map['store'] is Map) {
+          store.restoreFromMap((map['store'] as Map).cast<String, dynamic>());
+        }
+        appState.myContactCode = res.uri; // keep the live URI
+      } on Object {
+        // Corrupt/incompatible blob: fall back to a clean start.
+      } finally {
+        _restoring = false;
+      }
+    }
+
+    // Auto-persist on any subsequent change.
+    store.addListener(_scheduleSave);
+    appState.addListener(_scheduleSave);
+  }
+
+  void _scheduleSave() {
+    if (_restoring || !_started) return;
+    _saveTimer?.cancel();
+    _saveTimer = Timer(const Duration(milliseconds: 800), _saveNow);
+  }
+
+  void _saveNow() {
+    final appState = _appState;
+    if (appState == null || !_started) return;
+    final data = {'version': 1, 'app': appState.toMap(), 'store': store.toMap()};
+    core.saveState(jsonEncode(data));
+  }
 
   /// Boots the runtime under the per-platform app data dir, embedding
   /// [displayName] in the contact URI. Returns the URI on success, or an error.
@@ -106,6 +157,10 @@ class MessagingService {
   void stop() {
     _timer?.cancel();
     _timer = null;
+    _saveTimer?.cancel();
+    _saveTimer = null;
+    store.removeListener(_scheduleSave);
+    _appState?.removeListener(_scheduleSave);
     if (_started) core.stopRuntime();
     _started = false;
     store.onSend = null;

@@ -30,7 +30,7 @@ void main() {
   ));
 }
 
-class StunnerApp extends StatelessWidget {
+class StunnerApp extends StatefulWidget {
   const StunnerApp({
     super.key,
     required this.core,
@@ -47,23 +47,38 @@ class StunnerApp extends StatelessWidget {
   final MessagingService messaging;
 
   @override
+  State<StunnerApp> createState() => _StunnerAppState();
+}
+
+class _StunnerAppState extends State<StunnerApp> {
+  late final Future<void> _boot = widget.messaging.bootstrap(widget.appState);
+
+  @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: appState,
+      listenable: widget.appState,
       builder: (context, _) => MaterialApp(
         title: 'Stunner',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light(),
         darkTheme: AppTheme.dark(),
-        themeMode: appState.themeMode,
-        home: appState.onboarded
-            ? HomeShell(
-                core: core,
-                store: store,
-                appState: appState,
-                notifications: notifications,
-              )
-            : OnboardingScreen(appState: appState, messaging: messaging),
+        themeMode: widget.appState.themeMode,
+        home: FutureBuilder<void>(
+          future: _boot,
+          builder: (context, snap) {
+            if (snap.connectionState != ConnectionState.done) {
+              return const Scaffold(body: Center(child: CircularProgressIndicator()));
+            }
+            return widget.appState.onboarded
+                ? HomeShell(
+                    core: widget.core,
+                    store: widget.store,
+                    appState: widget.appState,
+                    notifications: widget.notifications,
+                  )
+                : OnboardingScreen(appState: widget.appState, messaging: widget.messaging);
+          },
+        ),
       ),
     );
   }

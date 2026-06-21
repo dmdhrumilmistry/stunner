@@ -10,6 +10,7 @@ import (
 	"github.com/dmdhrumilmistry/stunner/core/pkg/account"
 	"github.com/dmdhrumilmistry/stunner/core/pkg/node"
 	"github.com/dmdhrumilmistry/stunner/core/pkg/signaling"
+	"github.com/dmdhrumilmistry/stunner/core/pkg/storage"
 	"github.com/dmdhrumilmistry/stunner/core/pkg/transport"
 )
 
@@ -132,6 +133,52 @@ func TestRuntimeFileTransfer(t *testing.T) {
 		t.Errorf("sent msgId = %q, want f1", e.MsgID)
 	}
 	ac.wait(t, "delivered", func(e Event) bool { return e.Kind == "receipt" && e.Detail == "DELIVERED" })
+}
+
+// TestRuntimeStatePersistence round-trips the app-state blob through the
+// encrypted store and confirms it survives a fresh runtime over the same store.
+func TestRuntimeStatePersistence(t *testing.T) {
+	key := bytes.Repeat([]byte{9}, 32)
+	acc, err := account.LoadOrCreate(t.TempDir(), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storePath := filepath.Join(t.TempDir(), "store.bin")
+	reg := signaling.NewRegistry()
+
+	open := func() *Runtime {
+		st, serr := storage.Open(storage.Options{Path: storePath, Key: key})
+		if serr != nil {
+			t.Fatal(serr)
+		}
+		return StartWith(node.New(acc, st), mustTransport(t), reg.Join(acc.Fingerprint()), "h")
+	}
+
+	rt := open()
+	if got := rt.LoadState(); got != "" {
+		t.Fatalf("fresh store state = %q, want empty", got)
+	}
+	const want = `{"contacts":[{"name":"Ada"}],"onboarded":true}`
+	if err := rt.SaveState(want); err != nil {
+		t.Fatal(err)
+	}
+	rt.Stop()
+
+	// Re-open over the same store file: state persists.
+	rt2 := open()
+	defer rt2.Stop()
+	if got := rt2.LoadState(); got != want {
+		t.Errorf("loaded state = %q, want %q", got, want)
+	}
+}
+
+func mustTransport(t *testing.T) transport.Transport {
+	t.Helper()
+	tr, err := transport.New(transport.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tr
 }
 
 // TestRuntimeSendInvalidURI surfaces a sendFailed event for a malformed URI.

@@ -65,6 +65,31 @@ func StunnerSend(peerURI, text, msgID *C.char) *C.char {
 	return C.CString("ok")
 }
 
+//export StunnerSaveState
+func StunnerSaveState(jsonState *C.char) *C.char {
+	rtMu.Lock()
+	r := rt
+	rtMu.Unlock()
+	if r == nil {
+		return C.CString("error: runtime not started")
+	}
+	if err := r.SaveState(C.GoString(jsonState)); err != nil {
+		return C.CString("error: " + err.Error())
+	}
+	return C.CString("ok")
+}
+
+//export StunnerLoadState
+func StunnerLoadState() *C.char {
+	rtMu.Lock()
+	r := rt
+	rtMu.Unlock()
+	if r == nil {
+		return C.CString("")
+	}
+	return C.CString(r.LoadState())
+}
+
 //export StunnerSendFile
 func StunnerSendFile(peerURI, path, msgID *C.char) *C.char {
 	rtMu.Lock()
