@@ -16,6 +16,8 @@ dependencies:
   qr_flutter: ^4.1.0
   # Per-platform app data directory for the persistent identity / runtime store.
   path_provider: ^2.1.4
+  # Native file picker for sending file attachments.
+  file_picker: ^8.1.2
 
 dev_dependencies:
   flutter_test:

@@ -55,6 +55,16 @@ func Send(peerURI, text, msgID string) {
 	}
 }
 
+// SendFile enqueues the file at path to the peer identified by their contact URI.
+func SendFile(peerURI, path, msgID string) {
+	rtMu.Lock()
+	r := rt
+	rtMu.Unlock()
+	if r != nil {
+		r.SendFile(peerURI, path, msgID)
+	}
+}
+
 // MarkRead sends a read receipt for the latest message from the peer (call when
 // the user opens the conversation).
 func MarkRead(peerURI string) {

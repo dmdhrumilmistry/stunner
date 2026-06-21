@@ -51,6 +51,8 @@ class Message {
     DateTime? time,
     this.status = DeliveryStatus.sent,
     Map<String, int>? reactions,
+    this.fileName,
+    this.filePath,
   })  : time = time ?? DateTime.now(),
         reactions = reactions ?? {};
 
@@ -58,6 +60,12 @@ class Message {
   final String text;
   final bool fromMe;
   final DateTime time;
+
+  /// For a file message: the file's name and local path (null for text).
+  final String? fileName;
+  final String? filePath;
+
+  bool get isFile => fileName != null;
 
   /// Delivery status (only meaningful for outgoing messages).
   DeliveryStatus status;

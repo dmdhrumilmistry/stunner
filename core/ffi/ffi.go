@@ -65,6 +65,18 @@ func StunnerSend(peerURI, text, msgID *C.char) *C.char {
 	return C.CString("ok")
 }
 
+//export StunnerSendFile
+func StunnerSendFile(peerURI, path, msgID *C.char) *C.char {
+	rtMu.Lock()
+	r := rt
+	rtMu.Unlock()
+	if r == nil {
+		return C.CString("error: runtime not started")
+	}
+	r.SendFile(C.GoString(peerURI), C.GoString(path), C.GoString(msgID))
+	return C.CString("ok")
+}
+
 //export StunnerMarkRead
 func StunnerMarkRead(peerURI *C.char) *C.char {
 	rtMu.Lock()

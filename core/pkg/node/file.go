@@ -16,14 +16,31 @@ func (l *Link) ReceiveFile() (filetransfer.Offer, []byte, error) {
 	if err != nil {
 		return filetransfer.Offer{}, nil, err
 	}
+	offer, err := ParseFileOffer(env)
+	if err != nil {
+		return filetransfer.Offer{}, nil, err
+	}
+	data, err := l.ReceiveFileBody(offer)
+	return offer, data, err
+}
+
+// ParseFileOffer extracts the Offer from a FILE_OFFER envelope.
+func ParseFileOffer(env messaging.Envelope) (filetransfer.Offer, error) {
 	if env.Type != messaging.TypeFileOffer {
-		return filetransfer.Offer{}, nil, errors.New("node: expected file offer")
+		return filetransfer.Offer{}, errors.New("node: expected file offer")
 	}
 	var offer filetransfer.Offer
 	if err := json.Unmarshal(env.Body, &offer); err != nil {
-		return filetransfer.Offer{}, nil, err
+		return filetransfer.Offer{}, err
 	}
+	return offer, nil
+}
 
+// ReceiveFileBody reads the FILE_CHUNK envelopes that follow an already-received
+// offer and returns the reassembled, integrity-verified file. Use it when the
+// offer envelope was read separately (e.g. a single read loop dispatching by
+// type).
+func (l *Link) ReceiveFileBody(offer filetransfer.Offer) ([]byte, error) {
 	num := 0
 	if offer.ChunkSize > 0 {
 		num = int((offer.Size + uint64(offer.ChunkSize) - 1) / uint64(offer.ChunkSize))
@@ -32,16 +49,15 @@ func (l *Link) ReceiveFile() (filetransfer.Offer, []byte, error) {
 	for i := 0; i < num; i++ {
 		cenv, err := l.Receive()
 		if err != nil {
-			return filetransfer.Offer{}, nil, err
+			return nil, err
 		}
 		var c filetransfer.Chunk
 		if err := json.Unmarshal(cenv.Body, &c); err != nil {
-			return filetransfer.Offer{}, nil, err
+			return nil, err
 		}
 		chunks = append(chunks, c)
 	}
-	data, err := filetransfer.Reassemble(offer, chunks)
-	return offer, data, err
+	return filetransfer.Reassemble(offer, chunks)
 }
 
 func mustJSON(v any) []byte {

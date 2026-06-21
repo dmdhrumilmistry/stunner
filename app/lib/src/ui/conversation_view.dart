@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../models/chat.dart';
@@ -70,6 +71,20 @@ class _ConversationViewState extends State<ConversationView> {
     widget.store.sendText(widget.chatId, text);
     _controller.clear();
     WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+  }
+
+  Future<void> _attach() async {
+    try {
+      final result = await FilePicker.platform.pickFiles();
+      if (!mounted) return;
+      final path = result?.files.single.path;
+      if (path != null && path.isNotEmpty) {
+        widget.store.sendFile(widget.chatId, path);
+        WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+      }
+    } on Object catch (e) {
+      if (mounted) _notice('Could not attach file: $e');
+    }
   }
 
   void _scrollToBottom({bool animate = true}) {
@@ -300,8 +315,7 @@ class _ConversationViewState extends State<ConversationView> {
                       IconButton(
                         tooltip: 'Attach',
                         icon: const Icon(Icons.attach_file, size: 20),
-                        onPressed: () =>
-                            _notice('File sharing needs a live connection (coming soon).'),
+                        onPressed: _attach,
                       ),
                       Expanded(
                         child: TextField(
@@ -392,14 +406,34 @@ class _Bubble extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text(
-                  message.text,
-                  style: TextStyle(
-                    fontSize: 15,
-                    height: 1.3,
-                    color: me ? scheme.onPrimary : scheme.onSurface,
+                if (message.isFile)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.insert_drive_file_outlined,
+                          size: 20, color: me ? scheme.onPrimary : scheme.onSurface),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text(
+                          message.fileName ?? 'file',
+                          style: TextStyle(
+                            fontSize: 15,
+                            height: 1.3,
+                            color: me ? scheme.onPrimary : scheme.onSurface,
+                          ),
+                        ),
+                      ),
+                    ],
+                  )
+                else
+                  Text(
+                    message.text,
+                    style: TextStyle(
+                      fontSize: 15,
+                      height: 1.3,
+                      color: me ? scheme.onPrimary : scheme.onSurface,
+                    ),
                   ),
-                ),
                 const SizedBox(height: 2),
                 Row(
                   mainAxisSize: MainAxisSize.min,
