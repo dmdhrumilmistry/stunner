@@ -55,6 +55,17 @@ func Send(peerURI, text, msgID string) {
 	}
 }
 
+// Diagnose checks connectivity to a peer and reports the result as a
+// "diagnostic" event (drained via Poll).
+func Diagnose(peerURI string) {
+	rtMu.Lock()
+	r := rt
+	rtMu.Unlock()
+	if r != nil {
+		r.Diagnose(peerURI)
+	}
+}
+
 // SendTyping sends an ephemeral typing indicator to the peer (best effort).
 func SendTyping(peerURI string) {
 	rtMu.Lock()

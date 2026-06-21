@@ -176,6 +176,27 @@ void main() {
     expect(notifications.items.first.body, 'New message');
   });
 
+  test('Test connection invokes the diagnose hook and applies the result', () {
+    final store = ChatStore();
+    String? diagnosedUri;
+    store.onDiagnose = (uri) => diagnosedUri = uri;
+    final c = store.addContact(name: 'Ned', code: 'stunner:contact?k=n', fingerprint: 'fp-ned');
+    final chatId = store.startChatWith(c);
+
+    store.testConnection(chatId);
+    expect(diagnosedUri, 'stunner:contact?k=n');
+    expect(store.diagnosticFor('fp-ned')!.testing, isTrue);
+
+    store.applyDiagnostic('fp-ned', false, 'Not found on the network yet.');
+    final d = store.diagnosticFor('fp-ned')!;
+    expect(d.testing, isFalse);
+    expect(d.ok, isFalse);
+    expect(d.message, contains('Not found'));
+
+    store.clearDiagnostic('fp-ned');
+    expect(store.diagnosticFor('fp-ned'), isNull);
+  });
+
   test('Receiving a file creates an inbound file message', () {
     final store = ChatStore();
     store.receiveFileFromPeer('fp-m', 'stunner:contact?k=m', 'photo.jpg', '/data/photo.jpg');

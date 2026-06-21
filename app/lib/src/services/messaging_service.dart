@@ -111,6 +111,7 @@ class MessagingService {
       if (_appState?.prefs.readReceipts ?? true) core.markReadFor(uri);
     };
     store.onTyping = (uri) => core.sendTyping(uri);
+    store.onDiagnose = (uri) => core.diagnose(uri);
     _timer = Timer.periodic(const Duration(milliseconds: 600), (_) => _drain());
     return (ok: true, uri: res.uri, error: '');
   }
@@ -150,6 +151,8 @@ class MessagingService {
         store.setPresence(peerFp, item['online'] == true);
       } else if (kind == 'typing') {
         store.receiveTyping(peerFp);
+      } else if (kind == 'diagnostic') {
+        store.applyDiagnostic(peerFp, item['online'] == true, item['detail'] as String? ?? '');
       } else if (kind == 'receipt') {
         final state = item['detail'] as String? ?? '';
         if (state == 'DELIVERED') {
@@ -174,5 +177,6 @@ class MessagingService {
     store.onSendFile = null;
     store.onMarkRead = null;
     store.onTyping = null;
+    store.onDiagnose = null;
   }
 }

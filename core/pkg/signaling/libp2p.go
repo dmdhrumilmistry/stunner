@@ -15,6 +15,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/protocol"
+	"github.com/libp2p/go-libp2p/core/routing"
 	drouting "github.com/libp2p/go-libp2p/p2p/discovery/routing"
 	dutil "github.com/libp2p/go-libp2p/p2p/discovery/util"
 )
@@ -49,27 +50,80 @@ type dhtOffer struct {
 	data []byte
 }
 
-// NewDHT creates a libp2p host (listening on listenAddrs, or an ephemeral
-// localhost TCP port if none are given) and starts a Kademlia DHT in server
-// mode. Bootstrap by connecting to known peers via Connect.
+// NewDHT creates a libp2p host and a Kademlia DHT for decentralized discovery
+// and SDP/ICE signaling. When no listenAddrs are given it listens on all
+// interfaces over both IPv4 and IPv6, TCP and QUIC, so the best path can be
+// selected per peer.
+//
+// It enables the full NAT-traversal stack so two consumer-NAT'd devices can
+// actually reach each other: AutoNAT (reachability detection), UPnP/NAT-PMP
+// port mapping, circuit-relay v2 (AutoRelay, with relay candidates sourced from
+// the DHT) so a NAT'd node is reachable via a relay, and DCUtR hole punching to
+// upgrade relayed connections to direct. The DHT runs in ModeAuto (server only
+// when publicly reachable). Call BootstrapPublic to join the public DHT.
 func NewDHT(ctx context.Context, listenAddrs ...string) (*DHTSignaler, error) {
 	cctx, cancel := context.WithCancel(ctx)
-	opts := []libp2p.Option{}
 	if len(listenAddrs) == 0 {
-		listenAddrs = []string{"/ip4/127.0.0.1/tcp/0"}
+		listenAddrs = []string{
+			"/ip4/0.0.0.0/tcp/0",
+			"/ip4/0.0.0.0/udp/0/quic-v1",
+			"/ip6/::/tcp/0",
+			"/ip6/::/udp/0/quic-v1",
+		}
 	}
-	opts = append(opts, libp2p.ListenAddrStrings(listenAddrs...))
 
-	h, err := libp2p.New(opts...)
+	var (
+		h   host.Host
+		kad *dht.IpfsDHT
+	)
+	// relaySource yields relay candidates from the DHT routing table; AutoRelay
+	// probes them and keeps the ones offering circuit-relay v2.
+	relaySource := func(ctx context.Context, num int) <-chan peer.AddrInfo {
+		out := make(chan peer.AddrInfo, num)
+		go func() {
+			defer close(out)
+			if kad == nil || h == nil {
+				return
+			}
+			for _, p := range kad.RoutingTable().ListPeers() {
+				if num <= 0 {
+					return
+				}
+				ai := h.Peerstore().PeerInfo(p)
+				if len(ai.Addrs) == 0 {
+					continue
+				}
+				select {
+				case out <- ai:
+					num--
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+		return out
+	}
+
+	h, err := libp2p.New(
+		libp2p.ListenAddrStrings(listenAddrs...),
+		libp2p.EnableNATService(),
+		libp2p.NATPortMap(),
+		libp2p.EnableHolePunching(),
+		libp2p.EnableAutoRelayWithPeerSource(relaySource),
+		libp2p.Routing(func(host host.Host) (routing.PeerRouting, error) {
+			var derr error
+			kad, derr = dht.New(cctx, host, dht.Mode(dht.ModeAuto))
+			return kad, derr
+		}),
+	)
 	if err != nil {
 		cancel()
 		return nil, err
 	}
-	kad, err := dht.New(cctx, h, dht.Mode(dht.ModeServer))
-	if err != nil {
+	if kad == nil {
 		h.Close()
 		cancel()
-		return nil, err
+		return nil, errors.New("signaling: DHT routing not initialized")
 	}
 	if err := kad.Bootstrap(cctx); err != nil {
 		kad.Close()

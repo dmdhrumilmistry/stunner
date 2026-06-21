@@ -6,6 +6,19 @@ import '../models/chat.dart';
 import 'app_state.dart' show Prefs;
 import 'notification_service.dart';
 
+/// Result of a peer connectivity test ("Test connection").
+class ConnectionDiagnostic {
+  const ConnectionDiagnostic({required this.ok, required this.message}) : testing = false;
+  const ConnectionDiagnostic.testing()
+      : ok = false,
+        message = 'Testing connection…',
+        testing = true;
+
+  final bool ok;
+  final String message;
+  final bool testing;
+}
+
 /// In-memory chats + contacts shared by every screen, so the list and the
 /// conversation always agree. Local demo store: the live two-device path
 /// (WebRTC over STUN/TURN via the Go core) is wired over FFI in a later step.
@@ -30,6 +43,44 @@ class ChatStore extends ChangeNotifier {
 
   /// Outbound typing hook: (peerContactUri). Gated by [Prefs.typingIndicators].
   void Function(String peerUri)? onTyping;
+
+  /// Connectivity-test hook: (peerContactUri). Result returns via [applyDiagnostic].
+  void Function(String peerUri)? onDiagnose;
+
+  /// Last connectivity-test result per contact id (fingerprint).
+  final Map<String, ConnectionDiagnostic> _diagnostics = {};
+
+  ConnectionDiagnostic? diagnosticFor(String contactId) => _diagnostics[contactId];
+
+  /// Starts a connectivity test for a chat's peer (result via [applyDiagnostic]).
+  void testConnection(String chatId) {
+    final chat = maybeChat(chatId);
+    if (chat == null) return;
+    final contact = contactForChat(chat);
+    final uri = contact?.code ?? '';
+    if (contact == null || uri.isEmpty) return;
+    _diagnostics[contact.id] = const ConnectionDiagnostic.testing();
+    notifyListeners();
+    if (onDiagnose != null) {
+      onDiagnose!(uri);
+    } else {
+      _diagnostics[contact.id] =
+          const ConnectionDiagnostic(ok: false, message: 'Messaging core not available.');
+      notifyListeners();
+    }
+  }
+
+  /// Applies a diagnostic result from the runtime (by peer fingerprint).
+  void applyDiagnostic(String peerFingerprint, bool ok, String message) {
+    if (peerFingerprint.isEmpty) return;
+    _diagnostics[peerFingerprint] = ConnectionDiagnostic(ok: ok, message: message);
+    notifyListeners();
+  }
+
+  /// Dismisses a shown diagnostic for a contact.
+  void clearDiagnostic(String contactId) {
+    if (_diagnostics.remove(contactId) != null) notifyListeners();
+  }
 
   /// User preferences (set by the messaging service); gates receipts/typing/
   /// notification previews when present.
