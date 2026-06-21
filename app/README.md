@@ -12,7 +12,19 @@ generated locally so they aren't checked in as boilerplate:
 cd app
 flutter create --platforms=android,ios,macos,windows .
 flutter pub get
+# Grant the network permissions the P2P core needs (see note below).
+bash ../scripts/setup-app-permissions.sh .
 ```
+
+### Network permissions (required)
+
+Flutter only grants network access to **debug/profile** builds by default, so a
+**release** Android APK (no `INTERNET` permission) and the sandboxed **macOS**
+app (no network entitlement) gather **zero ICE candidates** — the STUN test
+reports *"No ICE candidates gathered"* and P2P cannot connect. Windows is
+unaffected. Run `scripts/setup-app-permissions.sh` (or `make app-permissions`
+from the repo root) after `flutter create` to patch the generated projects
+idempotently; the release CI does this automatically.
 
 ## Running
 

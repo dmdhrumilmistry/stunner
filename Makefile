@@ -61,10 +61,13 @@ check: build vet fmt-check test ## Build + vet + fmt-check + test (pre-push gate
 # ---------------------------------------------------------------------------
 # Flutter app
 # ---------------------------------------------------------------------------
-.PHONY: app-get app-analyze app-test app-run
+.PHONY: app-get app-analyze app-test app-run app-permissions
 
 app-get: ## flutter pub get
 	cd $(APP) && flutter pub get
+
+app-permissions: ## Patch generated platform projects with network permissions (run after `flutter create`)
+	bash scripts/setup-app-permissions.sh $(APP)
 
 app-analyze: ## flutter analyze
 	cd $(APP) && flutter analyze
@@ -72,7 +75,7 @@ app-analyze: ## flutter analyze
 app-test: ## flutter test
 	cd $(APP) && flutter test
 
-app-run: lib ## Build the core lib and run the app (desktop/device)
+app-run: lib app-permissions ## Build the core lib and run the app (desktop/device)
 	cp $(CORE)/$(LIBNAME) $(APP)/$(LIBNAME)
 	cd $(APP) && flutter pub get && flutter run
 
