@@ -73,6 +73,16 @@ class _ConversationViewState extends State<ConversationView> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
   }
 
+  DateTime _lastTyping = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// Emits a typing indicator, throttled to at most once every 3s.
+  void _onTyping() {
+    final now = DateTime.now();
+    if (now.difference(_lastTyping) < const Duration(seconds: 3)) return;
+    _lastTyping = now;
+    widget.store.sendTyping(widget.chatId);
+  }
+
   Future<void> _attach() async {
     try {
       final result = await FilePicker.platform.pickFiles();
@@ -235,13 +245,19 @@ class _ConversationViewState extends State<ConversationView> {
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w600),
                           ),
-                          Text(
-                            online ? 'Online' : 'Offline',
-                            style: TextStyle(
-                              fontSize: 12.5,
-                              color: online ? AppTheme.online : scheme.onSurfaceVariant,
-                            ),
-                          ),
+                          Builder(builder: (context) {
+                            final typing = contact != null && widget.store.isTyping(contact.id);
+                            return Text(
+                              typing ? 'typing…' : (online ? 'Online' : 'Offline'),
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                fontStyle: typing ? FontStyle.italic : FontStyle.normal,
+                                color: typing
+                                    ? AppTheme.online
+                                    : (online ? AppTheme.online : scheme.onSurfaceVariant),
+                              ),
+                            );
+                          }),
                         ],
                       ),
                     ),
@@ -334,6 +350,7 @@ class _ConversationViewState extends State<ConversationView> {
                             isDense: true,
                             contentPadding: EdgeInsets.symmetric(vertical: 10),
                           ),
+                          onChanged: (_) => _onTyping(),
                           onSubmitted: widget.appState.prefs.enterToSend ? (_) => _send() : null,
                         ),
                       ),

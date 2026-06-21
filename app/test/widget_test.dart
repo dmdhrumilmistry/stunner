@@ -144,6 +144,38 @@ void main() {
     expect(sentPath, '/tmp/report.pdf');
   });
 
+  test('Typing: receive sets isTyping; an inbound message clears it', () {
+    final store = ChatStore();
+    store.receiveTyping('fp-t');
+    expect(store.isTyping('fp-t'), isTrue);
+    store.receiveFromPeer('fp-t', '', 'hey');
+    expect(store.isTyping('fp-t'), isFalse);
+  });
+
+  test('Typing send respects the prefs toggle', () {
+    final store = ChatStore();
+    var called = 0;
+    store.onTyping = (_) => called++;
+    final c = store.addContact(name: 'T', code: 'stunner:contact?k=t', fingerprint: 'fp-t2');
+    final chatId = store.startChatWith(c);
+
+    store.prefs = Prefs()..typingIndicators = false;
+    store.sendTyping(chatId);
+    expect(called, 0);
+
+    store.prefs = Prefs()..typingIndicators = true;
+    store.sendTyping(chatId);
+    expect(called, 1);
+  });
+
+  test('Notification preview is hidden when disabled', () {
+    final notifications = NotificationService();
+    final store = ChatStore(notifications: notifications);
+    store.prefs = Prefs()..notifPreview = false;
+    store.receiveFromPeer('fp-n', '', 'secret message');
+    expect(notifications.items.first.body, 'New message');
+  });
+
   test('Receiving a file creates an inbound file message', () {
     final store = ChatStore();
     store.receiveFileFromPeer('fp-m', 'stunner:contact?k=m', 'photo.jpg', '/data/photo.jpg');

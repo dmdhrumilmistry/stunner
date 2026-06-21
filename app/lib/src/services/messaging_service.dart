@@ -40,6 +40,7 @@ class MessagingService {
     final res = await start(''); // identity comes from the persistent account
     if (!res.ok) return; // degraded (no native core): show onboarding
 
+    store.prefs = appState.prefs; // gate receipts/typing/notif preview
     appState.myContactCode = res.uri;
     final raw = core.loadState();
     if (raw.isNotEmpty) {
@@ -105,7 +106,11 @@ class MessagingService {
       }
       core.sendFile(uri, path, msgId);
     };
-    store.onMarkRead = (uri) => core.markReadFor(uri);
+    // Read receipts are suppressed when the user disables them.
+    store.onMarkRead = (uri) {
+      if (_appState?.prefs.readReceipts ?? true) core.markReadFor(uri);
+    };
+    store.onTyping = (uri) => core.sendTyping(uri);
     _timer = Timer.periodic(const Duration(milliseconds: 600), (_) => _drain());
     return (ok: true, uri: res.uri, error: '');
   }
@@ -143,6 +148,8 @@ class MessagingService {
         store.markFailed(item['msgId'] as String? ?? '');
       } else if (kind == 'presence') {
         store.setPresence(peerFp, item['online'] == true);
+      } else if (kind == 'typing') {
+        store.receiveTyping(peerFp);
       } else if (kind == 'receipt') {
         final state = item['detail'] as String? ?? '';
         if (state == 'DELIVERED') {
@@ -166,5 +173,6 @@ class MessagingService {
     store.onSend = null;
     store.onSendFile = null;
     store.onMarkRead = null;
+    store.onTyping = null;
   }
 }

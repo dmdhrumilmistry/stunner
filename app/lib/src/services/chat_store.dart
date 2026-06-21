@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../models/chat.dart';
+import 'app_state.dart' show Prefs;
 import 'notification_service.dart';
 
 /// In-memory chats + contacts shared by every screen, so the list and the
@@ -24,6 +27,40 @@ class ChatStore extends ChangeNotifier {
 
   /// Outbound file hook: (peerContactUri, localPath, msgId).
   void Function(String peerUri, String path, String msgId)? onSendFile;
+
+  /// Outbound typing hook: (peerContactUri). Gated by [Prefs.typingIndicators].
+  void Function(String peerUri)? onTyping;
+
+  /// User preferences (set by the messaging service); gates receipts/typing/
+  /// notification previews when present.
+  Prefs? prefs;
+
+  /// peerFingerprint -> time until which they're considered "typing".
+  final Map<String, DateTime> _typingUntil = {};
+  Timer? _typingTimer;
+
+  /// Whether the contact (by id == fingerprint) is currently typing.
+  bool isTyping(String contactId) {
+    final until = _typingUntil[contactId];
+    return until != null && DateTime.now().isBefore(until);
+  }
+
+  /// Records an inbound typing indicator (auto-expires after a few seconds).
+  void receiveTyping(String peerFingerprint) {
+    _typingUntil[peerFingerprint] = DateTime.now().add(const Duration(seconds: 6));
+    notifyListeners();
+    _typingTimer?.cancel();
+    _typingTimer = Timer(const Duration(seconds: 6), notifyListeners);
+  }
+
+  /// Sends a typing indicator for the chat (no-op if disabled in prefs).
+  void sendTyping(String chatId) {
+    if (prefs != null && !prefs!.typingIndicators) return;
+    final chat = maybeChat(chatId);
+    if (chat == null) return;
+    final uri = contactForChat(chat)?.code ?? '';
+    if (onTyping != null && uri.isNotEmpty) onTyping!(uri);
+  }
 
   final List<Contact> _contacts = [];
   final List<Chat> _chats = [];
@@ -244,10 +281,12 @@ class ChatStore extends ChangeNotifier {
       filePath: path,
     ));
     chat.unread += 1;
+    _typingUntil.remove(peerFingerprint);
     _moveToTop(chat);
     notifyListeners();
     if (!contact.muted) {
-      notifications?.push(title: chat.name, body: '📎 $name', chatId: chatId);
+      final preview = (prefs?.notifPreview ?? true) ? '📎 $name' : 'New message';
+      notifications?.push(title: chat.name, body: preview, chatId: chatId);
     }
   }
 
@@ -331,11 +370,13 @@ class ChatStore extends ChangeNotifier {
       fromMe: false,
     ));
     chat.unread += 1;
+    _typingUntil.remove(peerFingerprint); // a real message ends "typing"
     _moveToTop(chat);
     notifyListeners();
 
     if (!contact.muted) {
-      notifications?.push(title: chat.name, body: text, chatId: chatId);
+      final preview = (prefs?.notifPreview ?? true) ? text : 'New message';
+      notifications?.push(title: chat.name, body: preview, chatId: chatId);
     }
   }
 

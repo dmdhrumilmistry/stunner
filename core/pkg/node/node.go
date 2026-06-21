@@ -11,6 +11,7 @@ package node
 import (
 	"crypto/ed25519"
 	"errors"
+	"sync"
 
 	"github.com/dmdhrumilmistry/stunner/core/pkg/account"
 	"github.com/dmdhrumilmistry/stunner/core/pkg/crypto"
@@ -43,6 +44,11 @@ type Link struct {
 	session crypto.Session
 	peerFP  string
 	peerKey ed25519.PublicKey
+
+	// sendMu serializes encrypt+send so the Double Ratchet chain advances
+	// atomically and multi-frame sends (a file's chunks) aren't interleaved
+	// with other sends (receipts, typing) on the same link.
+	sendMu sync.Mutex
 }
 
 // PeerFingerprint returns the connected peer's identity fingerprint.
@@ -93,9 +99,8 @@ func (n *Node) Accept(conn transport.Conn) (*Link, error) {
 	return &Link{conn: conn, session: session, peerFP: session.PeerFingerprint(), peerKey: frame.Handshake.IdentitySign}, nil
 }
 
-// SendEnvelope encrypts and sends an application envelope, persisting it to the
-// store when one is configured.
-func (l *Link) SendEnvelope(n *Node, env messaging.Envelope) error {
+// encryptSendLocked encrypts and writes one envelope. Caller must hold sendMu.
+func (l *Link) encryptSendLocked(env messaging.Envelope) error {
 	pt, err := env.Encode()
 	if err != nil {
 		return err
@@ -108,13 +113,31 @@ func (l *Link) SendEnvelope(n *Node, env messaging.Envelope) error {
 	if err != nil {
 		return err
 	}
-	if err := l.conn.Send(frame); err != nil {
+	return l.conn.Send(frame)
+}
+
+// persistable reports whether an envelope type is a stored conversation message
+// (as opposed to a transport/ephemeral control frame).
+func persistable(t messaging.Type) bool {
+	return t == messaging.TypeText || t == messaging.TypeFileOffer
+}
+
+func (l *Link) sendEnvelopeLocked(n *Node, env messaging.Envelope) error {
+	if err := l.encryptSendLocked(env); err != nil {
 		return err
 	}
-	if n.Store != nil {
+	if n.Store != nil && persistable(env.Type) {
 		_ = n.Store.AppendMessage(env.ConvID, env, messaging.StateSent)
 	}
 	return nil
+}
+
+// SendEnvelope encrypts and sends an application envelope, persisting it to the
+// store when one is configured (and the type is a conversation message).
+func (l *Link) SendEnvelope(n *Node, env messaging.Envelope) error {
+	l.sendMu.Lock()
+	defer l.sendMu.Unlock()
+	return l.sendEnvelopeLocked(n, env)
 }
 
 // SendText sends a text message.
@@ -124,6 +147,13 @@ func (l *Link) SendText(n *Node, convID, text string) (messaging.Envelope, error
 		return messaging.Envelope{}, err
 	}
 	return env, l.SendEnvelope(n, env)
+}
+
+// SendTyping sends an ephemeral typing indicator (not persisted, best effort).
+func (l *Link) SendTyping(convID string) error {
+	l.sendMu.Lock()
+	defer l.sendMu.Unlock()
+	return l.encryptSendLocked(messaging.NewEnvelope(messaging.TypeTyping, convID, nil))
 }
 
 // Receive reads and decrypts the next envelope from the peer.
@@ -205,11 +235,15 @@ func (l *Link) SendFile(n *Node, convID, name, mime string, data []byte) (filetr
 	if err != nil {
 		return filetransfer.Offer{}, err
 	}
-	if err := l.SendEnvelope(n, envFor(messaging.TypeFileOffer, convID, offer)); err != nil {
+	// Hold the lock across offer+chunks so no other send (receipt/typing)
+	// interleaves between them and breaks the receiver's chunk reassembly.
+	l.sendMu.Lock()
+	defer l.sendMu.Unlock()
+	if err := l.sendEnvelopeLocked(n, envFor(messaging.TypeFileOffer, convID, offer)); err != nil {
 		return filetransfer.Offer{}, err
 	}
 	for _, c := range chunks {
-		if err := l.SendEnvelope(n, envFor(messaging.TypeFileChunk, convID, c)); err != nil {
+		if err := l.sendEnvelopeLocked(n, envFor(messaging.TypeFileChunk, convID, c)); err != nil {
 			return filetransfer.Offer{}, err
 		}
 	}
