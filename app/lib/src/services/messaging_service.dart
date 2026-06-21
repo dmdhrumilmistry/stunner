@@ -47,6 +47,13 @@ class MessagingService {
     myContactUri = res.uri;
     _started = true;
     store.onSend = _send;
+    store.onSendFile = (uri, path, msgId) {
+      if (!_started || uri.isEmpty) {
+        store.markFailed(msgId);
+        return;
+      }
+      core.sendFile(uri, path, msgId);
+    };
     store.onMarkRead = (uri) => core.markReadFor(uri);
     _timer = Timer.periodic(const Duration(milliseconds: 600), (_) => _drain());
     return (ok: true, uri: res.uri, error: '');
@@ -76,6 +83,9 @@ class MessagingService {
       final peerFp = item['peerFp'] as String? ?? '';
       if (kind == 'message') {
         store.receiveFromPeer(peerFp, item['peerUri'] as String? ?? '', item['text'] as String? ?? '');
+      } else if (kind == 'file') {
+        store.receiveFileFromPeer(peerFp, item['peerUri'] as String? ?? '',
+            item['name'] as String? ?? 'file', item['path'] as String? ?? '');
       } else if (kind == 'sent') {
         store.markSent(item['msgId'] as String? ?? '');
       } else if (kind == 'sendFailed') {
@@ -99,6 +109,7 @@ class MessagingService {
     if (_started) core.stopRuntime();
     _started = false;
     store.onSend = null;
+    store.onSendFile = null;
     store.onMarkRead = null;
   }
 }

@@ -17,6 +17,8 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"fmt"
+	"mime"
 	"os"
 	"path/filepath"
 	"sync"
@@ -43,10 +45,12 @@ const connectAttempts = 5
 
 // Event is a runtime notification drained by Poll and surfaced in the UI.
 type Event struct {
-	Kind    string `json:"kind"` // message | presence | sent | sendFailed | error
+	Kind    string `json:"kind"` // message | file | presence | sent | sendFailed | receipt | error
 	PeerFP  string `json:"peerFp,omitempty"`
 	PeerURI string `json:"peerUri,omitempty"` // lets the UI save/reply to an inbound peer
 	Text    string `json:"text,omitempty"`
+	Name    string `json:"name,omitempty"` // file name (kind=file)
+	Path    string `json:"path,omitempty"` // local path of a received file (kind=file)
 	MsgID   string `json:"msgId,omitempty"`
 	Online  bool   `json:"online,omitempty"`
 	Detail  string `json:"detail,omitempty"`
@@ -55,12 +59,13 @@ type Event struct {
 
 // Runtime is a running messaging engine for one account.
 type Runtime struct {
-	node *node.Node
-	tr   transport.Transport
-	sig  signaling.Signaler
-	salt []byte
-	uri  string
-	fp   string
+	node     *node.Node
+	tr       transport.Transport
+	sig      signaling.Signaler
+	salt     []byte
+	uri      string
+	fp       string
+	filesDir string // where received files are saved
 
 	mu      sync.Mutex
 	links   map[string]*node.Link
@@ -73,9 +78,10 @@ type Runtime struct {
 }
 
 type outReq struct {
-	peerURI string
-	text    string
-	msgID   string
+	peerURI  string
+	text     string
+	msgID    string
+	filePath string // non-empty => send this file instead of text
 }
 
 // Start loads (or creates) the persistent account at dataDir and wires the
@@ -107,7 +113,9 @@ func Start(dataDir, handle string) (*Runtime, error) {
 	}
 	go sig.BootstrapPublic() // best-effort, async; discovery improves once connected
 
-	return StartWith(node.New(acc, store), tr, sig, handle), nil
+	rt := StartWith(node.New(acc, store), tr, sig, handle)
+	rt.filesDir = filepath.Join(dataDir, "files")
+	return rt, nil
 }
 
 // StartWith builds a runtime over an already-constructed node, transport and
@@ -115,16 +123,17 @@ func Start(dataDir, handle string) (*Runtime, error) {
 // loopback so the full engine runs without networking.
 func StartWith(n *node.Node, tr transport.Transport, sig signaling.Signaler, handle string) *Runtime {
 	r := &Runtime{
-		node:    n,
-		tr:      tr,
-		sig:     sig,
-		salt:    RendezvousSalt,
-		uri:     n.Account.ContactURI(handle),
-		fp:      n.Account.Fingerprint(),
-		links:   map[string]*node.Link{},
-		lastIn:  map[string]string{},
-		outbox:  make(chan outReq, 64),
-		closeCh: make(chan struct{}),
+		node:     n,
+		tr:       tr,
+		sig:      sig,
+		salt:     RendezvousSalt,
+		uri:      n.Account.ContactURI(handle),
+		fp:       n.Account.Fingerprint(),
+		filesDir: filepath.Join(os.TempDir(), "stunner-recv", n.Account.Fingerprint()),
+		links:    map[string]*node.Link{},
+		lastIn:   map[string]string{},
+		outbox:   make(chan outReq, 64),
+		closeCh:  make(chan struct{}),
 	}
 	r.wg.Add(2)
 	go r.listenLoop()
@@ -144,6 +153,15 @@ func (r *Runtime) Fingerprint() string { return r.fp }
 func (r *Runtime) Send(peerURI, text, msgID string) {
 	select {
 	case r.outbox <- outReq{peerURI: peerURI, text: text, msgID: msgID}:
+	case <-r.closeCh:
+	}
+}
+
+// SendFile enqueues the file at path to the peer identified by their contact
+// URI. Like Send it returns immediately and reports a "sent"/"sendFailed" event.
+func (r *Runtime) SendFile(peerURI, path, msgID string) {
+	select {
+	case r.outbox <- outReq{peerURI: peerURI, filePath: path, msgID: msgID}:
 	case <-r.closeCh:
 	}
 }
@@ -245,6 +263,22 @@ func (r *Runtime) deliver(req outReq) {
 		r.adopt(link)
 	}
 
+	if req.filePath != "" {
+		data, ferr := os.ReadFile(req.filePath)
+		if ferr != nil {
+			r.push(Event{Kind: "sendFailed", PeerFP: fp, MsgID: req.msgID, Detail: ferr.Error()})
+			return
+		}
+		name := filepath.Base(req.filePath)
+		if _, ferr := link.SendFile(r.node, fp, name, mimeOf(name), data); ferr != nil {
+			r.dropLink(fp, link)
+			r.push(Event{Kind: "sendFailed", PeerFP: fp, MsgID: req.msgID, Detail: ferr.Error()})
+			return
+		}
+		r.push(Event{Kind: "sent", PeerFP: fp, MsgID: req.msgID})
+		return
+	}
+
 	// Build the envelope with the caller's msgID so delivery receipts (which
 	// reference it) correlate back to the UI's message.
 	env, err := messaging.NewText(fp, req.text)
@@ -293,6 +327,26 @@ func (r *Runtime) recvLoop(link *node.Link) {
 			r.push(Event{Kind: "message", PeerFP: fp, PeerURI: uri, MsgID: env.MsgID, Text: body.Text})
 			// Acknowledge receipt so the sender sees a "delivered" tick.
 			_ = link.SendReceipt(fp, env.MsgID, messaging.StateDelivered)
+		case messaging.TypeFileOffer:
+			offer, perr := node.ParseFileOffer(env)
+			if perr != nil {
+				r.push(Event{Kind: "error", Detail: "file offer: " + perr.Error()})
+				continue
+			}
+			data, ferr := link.ReceiveFileBody(offer)
+			if ferr != nil {
+				r.push(Event{Kind: "error", Detail: "file recv: " + ferr.Error()})
+				continue
+			}
+			path, serr := r.saveFile(offer.Name, data)
+			if serr != nil {
+				r.push(Event{Kind: "error", Detail: "file save: " + serr.Error()})
+				continue
+			}
+			r.setLastInbound(fp, env.MsgID)
+			r.push(Event{Kind: "file", PeerFP: fp, PeerURI: uri, MsgID: env.MsgID,
+				Name: offer.Name, Path: path, Detail: offer.MIME})
+			_ = link.SendReceipt(fp, env.MsgID, messaging.StateDelivered)
 		case messaging.TypeReceipt:
 			if rb, rerr := env.Receipt(); rerr == nil {
 				r.push(Event{Kind: "receipt", PeerFP: fp, MsgID: rb.RefMsgID, Detail: string(rb.State)})
@@ -318,6 +372,31 @@ func (r *Runtime) MarkRead(peerURI string) {
 		return
 	}
 	_ = link.SendReceipt(fp, msgID, messaging.StateRead)
+}
+
+// saveFile writes received file bytes under filesDir with a unique name and
+// returns the path.
+func (r *Runtime) saveFile(name string, data []byte) (string, error) {
+	if err := os.MkdirAll(r.filesDir, 0o700); err != nil {
+		return "", err
+	}
+	base := filepath.Base(name)
+	if base == "." || base == "/" || base == "" {
+		base = "file"
+	}
+	p := filepath.Join(r.filesDir, fmt.Sprintf("%d-%s", time.Now().UnixNano(), base))
+	if err := os.WriteFile(p, data, 0o600); err != nil {
+		return "", err
+	}
+	return p, nil
+}
+
+// mimeOf guesses a content type from a filename extension.
+func mimeOf(name string) string {
+	if t := mime.TypeByExtension(filepath.Ext(name)); t != "" {
+		return t
+	}
+	return "application/octet-stream"
 }
 
 func (r *Runtime) setLastInbound(fp, msgID string) {

@@ -82,6 +82,8 @@ class StunnerCore {
       _lib!.lookupFunction<_StartC, _StartDart>('StunnerStart');
   late final _SendDart _send =
       _lib!.lookupFunction<_SendC, _SendDart>('StunnerSend');
+  late final _SendDart _sendFile =
+      _lib!.lookupFunction<_SendC, _SendDart>('StunnerSendFile');
   late final _NoArgStrDart _poll =
       _lib!.lookupFunction<_NoArgStrC, _NoArgStrDart>('StunnerPoll');
   late final _NoArgStrDart _myUri =
@@ -268,6 +270,21 @@ class StunnerCore {
     final c = msgId.toNativeUtf8();
     try {
       _free(_send(a, b, c));
+    } finally {
+      malloc.free(a);
+      malloc.free(b);
+      malloc.free(c);
+    }
+  }
+
+  /// Enqueues the file at [path] to the peer at [peerUri]. Returns immediately.
+  void sendFile(String peerUri, String path, String msgId) {
+    if (!available) return;
+    final a = peerUri.toNativeUtf8();
+    final b = path.toNativeUtf8();
+    final c = msgId.toNativeUtf8();
+    try {
+      _free(_sendFile(a, b, c));
     } finally {
       malloc.free(a);
       malloc.free(b);

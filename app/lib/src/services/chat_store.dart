@@ -22,6 +22,9 @@ class ChatStore extends ChangeNotifier {
   /// Hook wired by the runtime to send a read receipt for a peer's contact URI.
   void Function(String peerUri)? onMarkRead;
 
+  /// Outbound file hook: (peerContactUri, localPath, msgId).
+  void Function(String peerUri, String path, String msgId)? onSendFile;
+
   final List<Contact> _contacts = [];
   final List<Chat> _chats = [];
 
@@ -174,6 +177,58 @@ class ChatStore extends ChangeNotifier {
     } else {
       msg.status = DeliveryStatus.failed;
       notifyListeners();
+    }
+  }
+
+  /// Sends a file (by local [path]) over the runtime via [onSendFile].
+  void sendFile(String chatId, String path) {
+    final name = path.split(RegExp(r'[/\\]')).last;
+    final chat = chatById(chatId);
+    final contact = contactForChat(chat);
+    final msg = Message(
+      id: 'localf-${DateTime.now().microsecondsSinceEpoch}',
+      text: '',
+      fromMe: true,
+      status: DeliveryStatus.sending,
+      fileName: name,
+      filePath: path,
+    );
+    chat.messages.add(msg);
+    _moveToTop(chat);
+    notifyListeners();
+
+    final uri = contact?.code ?? '';
+    if (onSendFile != null && uri.isNotEmpty) {
+      onSendFile!(uri, path, msg.id);
+    } else {
+      _setStatus(msg.id, DeliveryStatus.failed);
+    }
+  }
+
+  /// Delivers an incoming file from a peer into its conversation.
+  void receiveFileFromPeer(String peerFingerprint, String peerUri, String name, String path) {
+    if (peerFingerprint.isEmpty) return;
+    var contact = contactById(peerFingerprint);
+    if (contact == null) {
+      final tag = peerFingerprint.length <= 5 ? peerFingerprint : peerFingerprint.substring(0, 5);
+      contact = addContact(name: 'Contact $tag', code: peerUri, fingerprint: peerFingerprint);
+    }
+    if (contact.code.isEmpty && peerUri.isNotEmpty) contact.code = peerUri;
+
+    final chatId = startChatWith(contact);
+    final chat = chatById(chatId);
+    chat.messages.add(Message(
+      id: 'inf-${DateTime.now().microsecondsSinceEpoch}',
+      text: '',
+      fromMe: false,
+      fileName: name,
+      filePath: path,
+    ));
+    chat.unread += 1;
+    _moveToTop(chat);
+    notifyListeners();
+    if (!contact.muted) {
+      notifications?.push(title: chat.name, body: '📎 $name', chatId: chatId);
     }
   }
 

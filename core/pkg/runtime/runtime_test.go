@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -93,6 +95,43 @@ func TestRuntimeBidirectional(t *testing.T) {
 	if got.PeerFP != bob.Fingerprint() {
 		t.Errorf("alice saw peer %q, want %q", got.PeerFP, bob.Fingerprint())
 	}
+}
+
+// TestRuntimeFileTransfer sends a file between two runtimes over real pion
+// loopback and verifies the receiver reassembles identical bytes and the sender
+// sees sent + delivered.
+func TestRuntimeFileTransfer(t *testing.T) {
+	reg := signaling.NewRegistry()
+	alice := newRuntime(t, reg, "alice")
+	bob := newRuntime(t, reg, "bob")
+	defer alice.Stop()
+	defer bob.Stop()
+	ac := &collector{r: alice}
+	bc := &collector{r: bob}
+
+	want := bytes.Repeat([]byte("stunner file payload 📎\n"), 2000) // multi-chunk
+	src := filepath.Join(t.TempDir(), "report.txt")
+	if err := os.WriteFile(src, want, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	alice.SendFile(bob.MyURI(), src, "f1")
+
+	ev := bc.wait(t, "bob file", func(e Event) bool { return e.Kind == "file" })
+	if ev.Name != "report.txt" || ev.PeerFP != alice.Fingerprint() {
+		t.Errorf("file event name=%q peer=%q", ev.Name, ev.PeerFP)
+	}
+	got, err := os.ReadFile(ev.Path)
+	if err != nil {
+		t.Fatalf("read received file: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Errorf("received %d bytes, want %d (mismatch)", len(got), len(want))
+	}
+	if e := ac.wait(t, "alice sent", func(e Event) bool { return e.Kind == "sent" }); e.MsgID != "f1" {
+		t.Errorf("sent msgId = %q, want f1", e.MsgID)
+	}
+	ac.wait(t, "delivered", func(e Event) bool { return e.Kind == "receipt" && e.Detail == "DELIVERED" })
 }
 
 // TestRuntimeSendInvalidURI surfaces a sendFailed event for a malformed URI.

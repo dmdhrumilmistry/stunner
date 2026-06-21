@@ -124,4 +124,32 @@ void main() {
     store.markRead(chatId);
     expect(readUri, 'stunner:contact?k=j');
   });
+
+  test('Sending a file adds a file message and invokes the hook', () {
+    final store = ChatStore();
+    String? sentUri;
+    String? sentPath;
+    store.onSendFile = (uri, path, msgId) {
+      sentUri = uri;
+      sentPath = path;
+    };
+    final c = store.addContact(name: 'Liz', code: 'stunner:contact?k=l', fingerprint: 'fp-l');
+    final chatId = store.startChatWith(c);
+    store.sendFile(chatId, '/tmp/report.pdf');
+    final m = store.chatById(chatId).messages.single;
+    expect(m.isFile, isTrue);
+    expect(m.fileName, 'report.pdf');
+    expect(m.status, DeliveryStatus.sending);
+    expect(sentUri, 'stunner:contact?k=l');
+    expect(sentPath, '/tmp/report.pdf');
+  });
+
+  test('Receiving a file creates an inbound file message', () {
+    final store = ChatStore();
+    store.receiveFileFromPeer('fp-m', 'stunner:contact?k=m', 'photo.jpg', '/data/photo.jpg');
+    final m = store.chats.single.messages.single;
+    expect(m.isFile, isTrue);
+    expect(m.fileName, 'photo.jpg');
+    expect(m.fromMe, isFalse);
+  });
 }
