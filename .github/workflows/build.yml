@@ -1,0 +1,112 @@
+name: Build
+
+# Compile the Flutter app for every target platform on PRs and pushes to main,
+# so a platform/plugin/Gradle build break (e.g. a plugin requiring a newer
+# compileSdk) is caught here instead of only at release time. This complements
+# ci.yml (Go build/vet/test + Flutter analyze/test), which never assembles the
+# apps. It mirrors the build steps in release.yml minus packaging/upload; the Go
+# c-shared / jniLibs cross-compiles stay in release.yml (the app loads the core
+# at runtime, so it isn't needed to compile the app).
+
+on:
+  push:
+    branches: [main]
+    paths: ["app/**", "scripts/setup-app-permissions.sh", ".github/workflows/build.yml"]
+  pull_request:
+    paths: ["app/**", "scripts/setup-app-permissions.sh", ".github/workflows/build.yml"]
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    name: Build Android (APK)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Generate Android project
+        working-directory: app
+        run: flutter create --platforms=android .
+      - name: Bump Android compileSdk to 36
+        working-directory: app
+        shell: bash
+        # Mirror release.yml: the app module AND every plugin subproject must
+        # compile against 36 (file_picker's transitive
+        # flutter_plugin_android_lifecycle ships AAR metadata requiring it).
+        run: |
+          for f in android/app/build.gradle.kts android/app/build.gradle; do
+            [ -f "$f" ] || continue
+            sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 36/' "$f"
+            sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 36/' "$f"
+            sed -i -E 's/compileSdk(Version)?[ =]+[0-9]+/compileSdk = 36/' "$f"
+          done
+          if [ -f android/build.gradle.kts ]; then
+            printf '%s\n' \
+              '' \
+              'subprojects {' \
+              '    afterEvaluate {' \
+              '        extensions.findByName("android")?.withGroovyBuilder {' \
+              '            "compileSdkVersion"(36)' \
+              '        }' \
+              '    }' \
+              '}' >> android/build.gradle.kts
+          elif [ -f android/build.gradle ]; then
+            printf '%s\n' \
+              '' \
+              'subprojects {' \
+              '    afterEvaluate { project ->' \
+              '        if (project.extensions.findByName("android") != null) {' \
+              '            project.android { compileSdkVersion 36 }' \
+              '        }' \
+              '    }' \
+              '}' >> android/build.gradle
+          fi
+          echo "android.suppressUnsupportedCompileSdk=36" >> android/gradle.properties
+      - name: Build APK (release)
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build apk --release
+
+  desktop:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, platform: linux }
+          - { os: windows-latest, platform: windows }
+          - { os: macos-latest, platform: macos }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Linux build dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
+      - name: Generate desktop project
+        working-directory: app
+        shell: bash
+        run: flutter create --platforms=${{ matrix.platform }} .
+      - name: Build app (release)
+        working-directory: app
+        shell: bash
+        run: |
+          flutter pub get
+          flutter build ${{ matrix.platform }} --release
