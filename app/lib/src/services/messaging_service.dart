@@ -47,6 +47,7 @@ class MessagingService {
     myContactUri = res.uri;
     _started = true;
     store.onSend = _send;
+    store.onMarkRead = (uri) => core.markReadFor(uri);
     _timer = Timer.periodic(const Duration(milliseconds: 600), (_) => _drain());
     return (ok: true, uri: res.uri, error: '');
   }
@@ -81,6 +82,13 @@ class MessagingService {
         store.markFailed(item['msgId'] as String? ?? '');
       } else if (kind == 'presence') {
         store.setPresence(peerFp, item['online'] == true);
+      } else if (kind == 'receipt') {
+        final state = item['detail'] as String? ?? '';
+        if (state == 'DELIVERED') {
+          store.markDelivered(item['msgId'] as String? ?? '');
+        } else if (state == 'READ') {
+          store.markReadByPeer(peerFp);
+        }
       }
     }
   }
@@ -91,5 +99,6 @@ class MessagingService {
     if (_started) core.stopRuntime();
     _started = false;
     store.onSend = null;
+    store.onMarkRead = null;
   }
 }

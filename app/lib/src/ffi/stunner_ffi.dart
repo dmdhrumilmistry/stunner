@@ -41,6 +41,9 @@ typedef _StartDart = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>);
 typedef _SendC = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
 typedef _SendDart = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
 
+typedef _OneStrC = Pointer<Utf8> Function(Pointer<Utf8>);
+typedef _OneStrDart = Pointer<Utf8> Function(Pointer<Utf8>);
+
 typedef _NoArgStrC = Pointer<Utf8> Function();
 typedef _NoArgStrDart = Pointer<Utf8> Function();
 
@@ -85,6 +88,8 @@ class StunnerCore {
       _lib!.lookupFunction<_NoArgStrC, _NoArgStrDart>('StunnerMyURI');
   late final _NoArgStrDart _stop =
       _lib!.lookupFunction<_NoArgStrC, _NoArgStrDart>('StunnerStop');
+  late final _OneStrDart _markRead =
+      _lib!.lookupFunction<_OneStrC, _OneStrDart>('StunnerMarkRead');
   late final _FreeDart _free =
       _lib!.lookupFunction<_FreeC, _FreeDart>('StunnerFree');
 
@@ -286,6 +291,17 @@ class StunnerCore {
     final s = ptr.toDartString();
     _free(ptr);
     return s;
+  }
+
+  /// Sends a read receipt for the latest message from [peerUri].
+  void markReadFor(String peerUri) {
+    if (!available) return;
+    final a = peerUri.toNativeUtf8();
+    try {
+      _free(_markRead(a));
+    } finally {
+      malloc.free(a);
+    }
   }
 
   /// Stops the runtime.

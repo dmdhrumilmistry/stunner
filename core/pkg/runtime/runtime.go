@@ -64,6 +64,7 @@ type Runtime struct {
 
 	mu      sync.Mutex
 	links   map[string]*node.Link
+	lastIn  map[string]string // peerFP -> last inbound msgID (for read receipts)
 	events  []Event
 	closed  bool
 	outbox  chan outReq
@@ -121,6 +122,7 @@ func StartWith(n *node.Node, tr transport.Transport, sig signaling.Signaler, han
 		uri:     n.Account.ContactURI(handle),
 		fp:      n.Account.Fingerprint(),
 		links:   map[string]*node.Link{},
+		lastIn:  map[string]string{},
 		outbox:  make(chan outReq, 64),
 		closeCh: make(chan struct{}),
 	}
@@ -243,7 +245,17 @@ func (r *Runtime) deliver(req outReq) {
 		r.adopt(link)
 	}
 
-	if _, err := link.SendText(r.node, fp, req.text); err != nil {
+	// Build the envelope with the caller's msgID so delivery receipts (which
+	// reference it) correlate back to the UI's message.
+	env, err := messaging.NewText(fp, req.text)
+	if err != nil {
+		r.push(Event{Kind: "sendFailed", PeerFP: fp, MsgID: req.msgID, Detail: err.Error()})
+		return
+	}
+	if req.msgID != "" {
+		env.MsgID = req.msgID
+	}
+	if err := link.SendEnvelope(r.node, env); err != nil {
 		r.dropLink(fp, link)
 		r.push(Event{Kind: "sendFailed", PeerFP: fp, MsgID: req.msgID, Detail: err.Error()})
 		return
@@ -274,11 +286,44 @@ func (r *Runtime) recvLoop(link *node.Link) {
 			r.push(Event{Kind: "presence", PeerFP: fp, PeerURI: uri, Online: false})
 			return
 		}
-		if env.Type == messaging.TypeText {
+		switch env.Type {
+		case messaging.TypeText:
 			body, _ := env.Text()
-			r.push(Event{Kind: "message", PeerFP: fp, PeerURI: uri, Text: body.Text})
+			r.setLastInbound(fp, env.MsgID)
+			r.push(Event{Kind: "message", PeerFP: fp, PeerURI: uri, MsgID: env.MsgID, Text: body.Text})
+			// Acknowledge receipt so the sender sees a "delivered" tick.
+			_ = link.SendReceipt(fp, env.MsgID, messaging.StateDelivered)
+		case messaging.TypeReceipt:
+			if rb, rerr := env.Receipt(); rerr == nil {
+				r.push(Event{Kind: "receipt", PeerFP: fp, MsgID: rb.RefMsgID, Detail: string(rb.State)})
+			}
 		}
 	}
+}
+
+// MarkRead sends a read receipt for the latest message received from the peer
+// (call when the user opens the conversation), turning the peer's last sent
+// message(s) "read".
+func (r *Runtime) MarkRead(peerURI string) {
+	c, err := contact.ParseURI(peerURI)
+	if err != nil {
+		return
+	}
+	fp := identity.Fingerprint(c.IdentityKey)
+	link := r.getLink(fp)
+	r.mu.Lock()
+	msgID := r.lastIn[fp]
+	r.mu.Unlock()
+	if link == nil || msgID == "" {
+		return
+	}
+	_ = link.SendReceipt(fp, msgID, messaging.StateRead)
+}
+
+func (r *Runtime) setLastInbound(fp, msgID string) {
+	r.mu.Lock()
+	r.lastIn[fp] = msgID
+	r.mu.Unlock()
 }
 
 // peerURI reconstructs the peer's shareable contact URI from the identity key
