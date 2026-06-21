@@ -40,6 +40,7 @@ type DHTSignaler struct {
 	mu         sync.Mutex
 	lastRemote peer.ID
 	answers    map[peer.ID]chan []byte // per-peer answer queues (offerer side)
+	advertised map[string]struct{}     // discovery namespaces with a live advertise loop
 
 	offerIn chan dhtOffer // inbound offers (answerer side)
 	candIn  chan []byte
@@ -132,14 +133,15 @@ func NewDHT(ctx context.Context, listenAddrs ...string) (*DHTSignaler, error) {
 		return nil, err
 	}
 	s := &DHTSignaler{
-		ctx:     cctx,
-		cancel:  cancel,
-		host:    h,
-		kad:     kad,
-		disc:    drouting.NewRoutingDiscovery(kad),
-		answers: map[peer.ID]chan []byte{},
-		offerIn: make(chan dhtOffer, 8),
-		candIn:  make(chan []byte, 8),
+		ctx:        cctx,
+		cancel:     cancel,
+		host:       h,
+		kad:        kad,
+		disc:       drouting.NewRoutingDiscovery(kad),
+		answers:    map[peer.ID]chan []byte{},
+		advertised: map[string]struct{}{},
+		offerIn:    make(chan dhtOffer, 8),
+		candIn:     make(chan []byte, 8),
 	}
 	h.SetStreamHandler(signalProtocol, s.onStream)
 	return s, nil
@@ -185,8 +187,30 @@ func (s *DHTSignaler) Connect(info peer.AddrInfo) error {
 	return s.host.Connect(s.ctx, info)
 }
 
+// Advertise publishes this discovery key to the DHT and keeps the provider
+// record fresh. The first call for a given key starts one background loop
+// (discovery/util.Advertise) that retries until the routing table is ready and
+// then re-provides on the record's TTL; later calls for the same key are no-ops.
+//
+// The dedup matters: Advertise is invoked on every node.Listen accept-loop
+// iteration and on every runtime.readvertiseLoop tick. discovery/util.Advertise
+// spawns a *perpetual* goroutine per call, so without this guard the process
+// leaked an unbounded number of re-advertise goroutines over its lifetime. One
+// loop per key both fixes the leak and preserves the retry/refresh behaviour
+// (which the single-shot disc.Advertise lacks — it fails outright before the DHT
+// has peers).
 func (s *DHTSignaler) Advertise(discoveryKey []byte) error {
-	dutil.Advertise(s.ctx, s.disc, hex.EncodeToString(discoveryKey))
+	ns := hex.EncodeToString(discoveryKey)
+	s.mu.Lock()
+	_, running := s.advertised[ns]
+	if !running {
+		s.advertised[ns] = struct{}{}
+	}
+	s.mu.Unlock()
+	if running {
+		return nil
+	}
+	dutil.Advertise(s.ctx, s.disc, ns)
 	return nil
 }
 
