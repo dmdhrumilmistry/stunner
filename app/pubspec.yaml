@@ -21,6 +21,10 @@ dependencies:
   # Contact exchange: render your identity as a QR code and scan a peer's.
   qr_flutter: ^4.1.0
   mobile_scanner: ^5.1.1
+  # Per-OS secure store for the 32-byte vault key (Keystore / DPAPI / Keychain).
+  flutter_secure_storage: ^9.2.2
+  # Resolve the per-app data directory for the encrypted account store.
+  path_provider: ^2.1.3
 
 dev_dependencies:
   flutter_test:

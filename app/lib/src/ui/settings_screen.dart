@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../ffi/stunner_ffi.dart';
+import 'ice_servers_screen.dart';
 import 'my_identity_screen.dart';
 
 /// Settings: STUN/TURN override, optional relay, app lock, and a diagnostics
@@ -33,7 +34,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               '(e.g. self-hosted coturn).',
             ),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () {}, // TODO(phase 7): ICE server editor -> core settings
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const IceServersScreen(),
+              ),
+            ),
           ),
           SwitchListTile(
             secondary: const Icon(Icons.inbox_outlined),

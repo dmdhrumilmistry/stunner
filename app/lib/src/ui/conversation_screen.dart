@@ -1,17 +1,15 @@
 import 'package:flutter/material.dart';
 
+import '../core/chat_store.dart';
 import '../models/chat.dart';
-import '../services/emoji.dart';
 
-/// A single conversation view with a message composer.
-///
-/// The composer includes hooks for emoji (Unicode + animated) and file
-/// attachment; sending is wired to the Go core's messaging service in a later
-/// roadmap phase.
+/// A single conversation view with a message composer. Messages and sending are
+/// backed by the [ChatStore] (Go core over FFI).
 class ConversationScreen extends StatefulWidget {
-  const ConversationScreen({super.key, required this.chat});
+  const ConversationScreen({super.key, required this.convId, required this.store});
 
-  final Chat chat;
+  final String convId;
+  final ChatStore store;
 
   @override
   State<ConversationScreen> createState() => _ConversationScreenState();
@@ -19,10 +17,6 @@ class ConversationScreen extends StatefulWidget {
 
 class _ConversationScreenState extends State<ConversationScreen> {
   final _controller = TextEditingController();
-  final _messages = <Message>[
-    const Message(id: 'm1', text: 'Hey! 👋', fromMe: false),
-    const Message(id: 'm2', text: 'Hi — end-to-end encrypted 🔒', fromMe: true),
-  ];
 
   @override
   void dispose() {
@@ -31,27 +25,37 @@ class _ConversationScreenState extends State<ConversationScreen> {
   }
 
   void _send() {
-    final text = expandShortcodes(_controller.text.trim());
+    final text = _controller.text.trim();
     if (text.isEmpty) return;
-    setState(() {
-      _messages.add(Message(id: 'local-${_messages.length}', text: text, fromMe: true));
-      _controller.clear();
-    });
-    // TODO: deliver via the core's node/link (core.sendText over FFI) once the
-    // stateful runtime is exposed across the boundary.
+    widget.store.send(widget.convId, text);
+    _controller.clear();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.chat.displayName)),
+      appBar: AppBar(
+        title: ListenableBuilder(
+          listenable: widget.store,
+          builder: (context, _) {
+            final chat = widget.store.chatFor(widget.convId);
+            return Text(chat?.displayName ?? 'Conversation');
+          },
+        ),
+      ),
       body: Column(
         children: [
           Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.all(12),
-              itemCount: _messages.length,
-              itemBuilder: (context, i) => _Bubble(message: _messages[i]),
+            child: ListenableBuilder(
+              listenable: widget.store,
+              builder: (context, _) {
+                final messages = widget.store.messagesFor(widget.convId);
+                return ListView.builder(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: messages.length,
+                  itemBuilder: (context, i) => _Bubble(message: messages[i]),
+                );
+              },
             ),
           ),
           SafeArea(child: _Composer(controller: _controller, onSend: _send)),
@@ -78,9 +82,33 @@ class _Bubble extends StatelessWidget {
           color: message.fromMe ? scheme.primaryContainer : scheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(16),
         ),
-        child: Text(message.text),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Flexible(child: Text(message.text)),
+            if (message.fromMe) ...[
+              const SizedBox(width: 6),
+              Icon(_stateIcon(message.state), size: 14, color: scheme.outline),
+            ],
+          ],
+        ),
       ),
     );
+  }
+
+  IconData _stateIcon(String state) {
+    switch (state) {
+      case 'FAILED':
+        return Icons.error_outline;
+      case 'QUEUED':
+        return Icons.schedule;
+      case 'DELIVERED':
+      case 'READ':
+        return Icons.done_all;
+      default:
+        return Icons.check;
+    }
   }
 }
 

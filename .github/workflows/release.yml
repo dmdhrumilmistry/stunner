@@ -251,7 +251,8 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
+          # libsecret-1-dev: required by flutter_secure_storage's Linux plugin.
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libsecret-1-dev
       - name: Generate desktop project
         working-directory: app
         shell: bash

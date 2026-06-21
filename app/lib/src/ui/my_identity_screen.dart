@@ -18,7 +18,17 @@ class MyIdentityScreen extends StatefulWidget {
 }
 
 class _MyIdentityScreenState extends State<MyIdentityScreen> {
-  late final String _myUri = widget.core.newContactURI('me');
+  late final String _myUri = _resolveMyUri();
+
+  /// Prefers the started runtime's persistent contact URI (the identity peers
+  /// actually reach); falls back to an ephemeral one if the runtime is not up.
+  String _resolveMyUri() {
+    try {
+      return widget.core.myContactURI('me');
+    } on Object {
+      return widget.core.newContactURI('me');
+    }
+  }
   final _peerController = TextEditingController();
   String? _safetyNumber;
   String? _error;

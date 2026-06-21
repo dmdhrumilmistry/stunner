@@ -34,6 +34,29 @@ typedef _ValidateDart = Pointer<Utf8> Function(Pointer<Utf8>);
 typedef _FreeC = Void Function(Pointer<Utf8>);
 typedef _FreeDart = void Function(Pointer<Utf8>);
 
+// Stateful runtime (live messaging path).
+typedef _StartC = Pointer<Utf8> Function(
+    Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
+typedef _StartDart = Pointer<Utf8> Function(
+    Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
+
+typedef _ConnectC = Pointer<Utf8> Function(Pointer<Utf8>);
+typedef _ConnectDart = Pointer<Utf8> Function(Pointer<Utf8>);
+
+typedef _SendTextC = Pointer<Utf8> Function(
+    Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
+typedef _SendTextDart = Pointer<Utf8> Function(
+    Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
+
+typedef _PollC = Pointer<Utf8> Function();
+typedef _PollDart = Pointer<Utf8> Function();
+
+typedef _MyContactURIC = Pointer<Utf8> Function(Pointer<Utf8>);
+typedef _MyContactURIDart = Pointer<Utf8> Function(Pointer<Utf8>);
+
+typedef _StopC = Void Function();
+typedef _StopDart = void Function();
+
 /// Thin wrapper over the native Stunner core.
 ///
 /// Construct with [StunnerCore.open]. If the native library is not present
@@ -61,6 +84,18 @@ class StunnerCore {
       .lookupFunction<_ValidateC, _ValidateDart>('StunnerValidateContactURI');
   late final _FreeDart _free =
       _lib!.lookupFunction<_FreeC, _FreeDart>('StunnerFree');
+  late final _StartDart _start =
+      _lib!.lookupFunction<_StartC, _StartDart>('StunnerStart');
+  late final _ConnectDart _connect =
+      _lib!.lookupFunction<_ConnectC, _ConnectDart>('StunnerConnect');
+  late final _SendTextDart _sendText =
+      _lib!.lookupFunction<_SendTextC, _SendTextDart>('StunnerSendText');
+  late final _PollDart _poll =
+      _lib!.lookupFunction<_PollC, _PollDart>('StunnerPoll');
+  late final _MyContactURIDart _myContactURI = _lib!
+      .lookupFunction<_MyContactURIC, _MyContactURIDart>('StunnerMyContactURI');
+  late final _StopDart _stop =
+      _lib!.lookupFunction<_StopC, _StopDart>('StunnerStop');
 
   /// Loads the native library for the current desktop platform.
   static StunnerCore open() {
@@ -188,4 +223,106 @@ class StunnerCore {
       malloc.free(arg);
     }
   }
+
+  // --- stateful runtime (live messaging) -------------------------------------
+
+  /// Reads a native result string, frees it, and throws [StunnerException] if it
+  /// is an "error: ..." sentinel.
+  String _unwrap(Pointer<Utf8> ptr) {
+    final s = ptr.toDartString();
+    _free(ptr);
+    if (s.startsWith('error: ')) {
+      throw StunnerException(s.substring(7));
+    }
+    return s;
+  }
+
+  /// Starts the runtime: opens the account at [accountDir] (creating it on first
+  /// run), brings up signaling + transport, and begins accepting peers.
+  ///
+  /// [keyHex] is the 32-byte vault key as 64 hex chars (from the OS secure
+  /// store). [iceServersJson] is a JSON array of `{urls,username,credential}`
+  /// (empty string uses the built-in STUN defaults). No-op in degraded mode.
+  void start({
+    required String accountDir,
+    required String keyHex,
+    String iceServersJson = '',
+  }) {
+    if (!available) return;
+    final dir = accountDir.toNativeUtf8();
+    final key = keyHex.toNativeUtf8();
+    final ice = iceServersJson.toNativeUtf8();
+    try {
+      _unwrap(_start(dir, key, ice));
+    } finally {
+      malloc.free(dir);
+      malloc.free(key);
+      malloc.free(ice);
+    }
+  }
+
+  /// Discovers and dials the peer named by a scanned `stunner:contact` URI,
+  /// returning the peer fingerprint. Throws on failure.
+  String connect(String contactUri) {
+    if (!available) throw const StunnerException('core unavailable');
+    final arg = contactUri.toNativeUtf8();
+    try {
+      return _unwrap(_connect(arg));
+    } finally {
+      malloc.free(arg);
+    }
+  }
+
+  /// Sends [text] to the peer [peerFp] within [convId], returning the message
+  /// id. Throws on failure.
+  String sendText(String convId, String peerFp, String text) {
+    if (!available) throw const StunnerException('core unavailable');
+    final c = convId.toNativeUtf8();
+    final p = peerFp.toNativeUtf8();
+    final t = text.toNativeUtf8();
+    try {
+      return _unwrap(_sendText(c, p, t));
+    } finally {
+      malloc.free(c);
+      malloc.free(p);
+      malloc.free(t);
+    }
+  }
+
+  /// Drains and returns buffered events as a JSON array string (e.g.
+  /// `[{"kind":"message","convId":"..","peerFp":"..","text":"..","msgId":".."}]`).
+  /// Returns `"[]"` when nothing is pending or the core is unavailable.
+  String pollEventsJson() {
+    if (!available) return '[]';
+    final ptr = _poll();
+    final s = ptr.toDartString();
+    _free(ptr);
+    return s;
+  }
+
+  /// The started account's persistent contact URI (render as a QR code). Throws
+  /// if the runtime is not started.
+  String myContactURI(String handle) {
+    if (!available) return 'stunner:contact?n=$handle';
+    final arg = handle.toNativeUtf8();
+    try {
+      return _unwrap(_myContactURI(arg));
+    } finally {
+      malloc.free(arg);
+    }
+  }
+
+  /// Tears the runtime down. Safe to call when not started.
+  void stop() {
+    if (!available) return;
+    _stop();
+  }
+}
+
+/// Thrown when the native core returns an "error: ..." result.
+class StunnerException implements Exception {
+  const StunnerException(this.message);
+  final String message;
+  @override
+  String toString() => 'StunnerException: $message';
 }
