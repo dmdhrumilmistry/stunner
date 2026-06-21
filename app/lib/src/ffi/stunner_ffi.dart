@@ -94,6 +94,8 @@ class StunnerCore {
       _lib!.lookupFunction<_OneStrC, _OneStrDart>('StunnerMarkRead');
   late final _OneStrDart _sendTyping =
       _lib!.lookupFunction<_OneStrC, _OneStrDart>('StunnerSendTyping');
+  late final _OneStrDart _diagnose =
+      _lib!.lookupFunction<_OneStrC, _OneStrDart>('StunnerDiagnose');
   late final _OneStrDart _saveState =
       _lib!.lookupFunction<_OneStrC, _OneStrDart>('StunnerSaveState');
   late final _NoArgStrDart _loadState =
@@ -337,6 +339,18 @@ class StunnerCore {
     final a = peerUri.toNativeUtf8();
     try {
       _free(_sendTyping(a));
+    } finally {
+      malloc.free(a);
+    }
+  }
+
+  /// Runs a connectivity diagnostic to [peerUri]; the result arrives as a
+  /// "diagnostic" event via [pollEvents].
+  void diagnose(String peerUri) {
+    if (!available) return;
+    final a = peerUri.toNativeUtf8();
+    try {
+      _free(_diagnose(a));
     } finally {
       malloc.free(a);
     }

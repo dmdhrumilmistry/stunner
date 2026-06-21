@@ -199,15 +199,56 @@ class _ConversationViewState extends State<ConversationView> {
           });
         }
         final contact = widget.store.contactForChat(chat);
+        final diag = contact != null ? widget.store.diagnosticFor(contact.id) : null;
         return Column(
           children: [
             _header(context, chat, contact),
             Divider(height: 1, color: Theme.of(context).colorScheme.outline),
+            if (diag != null && contact != null) _diagnosticBanner(context, contact, diag),
             Expanded(child: _messageList(chat, contact)),
             SafeArea(top: false, child: _composer(context)),
           ],
         );
       },
+    );
+  }
+
+  Widget _diagnosticBanner(BuildContext context, Contact contact, ConnectionDiagnostic diag) {
+    final scheme = Theme.of(context).colorScheme;
+    final Color color;
+    final Widget leading;
+    if (diag.testing) {
+      color = scheme.onSurfaceVariant;
+      leading = const SizedBox(
+          width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2));
+    } else if (diag.ok) {
+      color = AppTheme.online;
+      leading = Icon(Icons.check_circle_outline, size: 18, color: color);
+    } else {
+      color = scheme.error;
+      leading = Icon(Icons.error_outline, size: 18, color: color);
+    }
+    return Container(
+      width: double.infinity,
+      color: color.withValues(alpha: 0.10),
+      padding: const EdgeInsets.fromLTRB(14, 10, 6, 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(padding: const EdgeInsets.only(top: 1), child: leading),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(diag.message, style: TextStyle(fontSize: 12.5, height: 1.35, color: color)),
+          ),
+          if (!diag.testing)
+            IconButton(
+              tooltip: 'Dismiss',
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.close, size: 16),
+              onPressed: () => widget.store.clearDiagnostic(contact.id),
+            ),
+        ],
+      ),
     );
   }
 
@@ -265,6 +306,11 @@ class _ConversationViewState extends State<ConversationView> {
                 ),
               ),
             ),
+          ),
+          IconButton(
+            tooltip: 'Test connection',
+            icon: const Icon(Icons.network_check),
+            onPressed: () => widget.store.testConnection(widget.chatId),
           ),
           IconButton(
             tooltip: 'Voice call',

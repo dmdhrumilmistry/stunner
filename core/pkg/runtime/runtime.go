@@ -39,9 +39,18 @@ import (
 // RendezvousSalt namespaces this app's discovery keys in the DHT.
 var RendezvousSalt = []byte("stunner/rendezvous/1")
 
-// connectAttempts bounds how many times a send retries discovery/connect before
-// giving up (covers DHT propagation delay and a peer coming online).
-const connectAttempts = 5
+// Connecting to a peer over the public DHT can take a while: provider records
+// must propagate and NAT traversal (relay reservation + hole punch) must
+// complete. Retry discovery/connect for up to connectAttempts spaced
+// connectBackoff apart (~36s total) before giving up on a send.
+const (
+	connectAttempts = 12
+	connectBackoff  = 3 * time.Second
+)
+
+// readvertiseInterval re-announces our discovery key so DHT provider records
+// stay fresh and keep propagating while we wait for a peer.
+const readvertiseInterval = 90 * time.Second
 
 // stateNamespace/stateKey locate the app-state blob in the encrypted store.
 const (
@@ -115,8 +124,9 @@ func Start(dataDir, handle string) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	sig, err := signaling.NewDHT(context.Background(),
-		"/ip4/0.0.0.0/tcp/0", "/ip4/0.0.0.0/udp/0/quic-v1")
+	// No explicit listen addrs: NewDHT defaults to dual-stack IPv4+IPv6 over
+	// TCP and QUIC, with NAT traversal enabled.
+	sig, err := signaling.NewDHT(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -144,10 +154,29 @@ func StartWith(n *node.Node, tr transport.Transport, sig signaling.Signaler, han
 		outbox:   make(chan outReq, 64),
 		closeCh:  make(chan struct{}),
 	}
-	r.wg.Add(2)
+	r.wg.Add(3)
 	go r.listenLoop()
 	go r.sendWorker()
+	go r.readvertiseLoop()
 	return r
+}
+
+// readvertiseLoop periodically re-announces our discovery key so the DHT
+// provider record stays fresh and keeps propagating while we wait for peers
+// (node.Listen only advertises once per accept, and blocks in between).
+func (r *Runtime) readvertiseLoop() {
+	defer r.wg.Done()
+	key := identity.DiscoveryKey(r.node.Account.Identity.SigningPub, r.salt)
+	t := time.NewTicker(readvertiseInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-r.closeCh:
+			return
+		case <-t.C:
+			_ = r.sig.Advertise(key)
+		}
+	}
 }
 
 // MyURI returns this account's shareable contact URI (share it so peers can add
@@ -176,6 +205,47 @@ func (r *Runtime) SendTyping(peerURI string) {
 	if link := r.getLink(identity.Fingerprint(c.IdentityKey)); link != nil {
 		_ = link.SendTyping(identity.Fingerprint(c.IdentityKey))
 	}
+}
+
+// Diagnose checks connectivity to a peer and reports which stage fails, as a
+// "diagnostic" event (Online = reachable, Detail = explanation). It runs in the
+// background so the FFI call stays non-blocking. Stages: parse URI -> existing
+// link -> DHT discovery -> dial + handshake.
+func (r *Runtime) Diagnose(peerURI string) {
+	go r.runDiagnose(peerURI)
+}
+
+func (r *Runtime) runDiagnose(peerURI string) {
+	c, err := contact.ParseURI(peerURI)
+	if err != nil {
+		r.pushDiag(peerURI, "", false, "Invalid contact ID — re-add the contact from their shared code.")
+		return
+	}
+	fp := identity.Fingerprint(c.IdentityKey)
+
+	if r.getLink(fp) != nil {
+		r.pushDiag(peerURI, fp, true, "Connected — a live end-to-end-encrypted link is open.")
+		return
+	}
+	if _, ferr := r.sig.Find(identity.DiscoveryKey(c.IdentityKey, r.salt)); ferr != nil {
+		r.pushDiag(peerURI, fp, false, "Not found on the network yet. The peer may be offline, "+
+			"may have just come online (discovery records take ~30s to propagate), or their "+
+			"network blocks peer discovery. Make sure both devices are online and try again.")
+		return
+	}
+	link, cerr := r.node.Connect(r.tr, r.sig, c.IdentityKey, r.salt)
+	if cerr != nil {
+		r.pushDiag(peerURI, fp, false, "Found the peer but couldn't establish a direct connection: "+
+			cerr.Error()+". This is usually a strict NAT/firewall. Add a TURN server in "+
+			"Network settings (and have the peer do the same) to relay the connection.")
+		return
+	}
+	r.adopt(link)
+	r.pushDiag(peerURI, fp, true, "Connected — direct encrypted link established.")
+}
+
+func (r *Runtime) pushDiag(peerURI, fp string, ok bool, detail string) {
+	r.push(Event{Kind: "diagnostic", PeerURI: peerURI, PeerFP: fp, Online: ok, Detail: detail})
 }
 
 // SendFile enqueues the file at path to the peer identified by their contact
@@ -325,7 +395,7 @@ func (r *Runtime) deliver(req outReq) {
 			select {
 			case <-r.closeCh:
 				return
-			case <-time.After(time.Duration(attempt+1) * 300 * time.Millisecond):
+			case <-time.After(connectBackoff):
 			}
 		}
 		if link == nil {

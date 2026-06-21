@@ -65,6 +65,17 @@ func StunnerSend(peerURI, text, msgID *C.char) *C.char {
 	return C.CString("ok")
 }
 
+//export StunnerDiagnose
+func StunnerDiagnose(peerURI *C.char) *C.char {
+	rtMu.Lock()
+	r := rt
+	rtMu.Unlock()
+	if r != nil {
+		r.Diagnose(C.GoString(peerURI))
+	}
+	return C.CString("ok")
+}
+
 //export StunnerSendTyping
 func StunnerSendTyping(peerURI *C.char) *C.char {
 	rtMu.Lock()
