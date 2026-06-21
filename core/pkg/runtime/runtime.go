@@ -43,6 +43,12 @@ var RendezvousSalt = []byte("stunner/rendezvous/1")
 // giving up (covers DHT propagation delay and a peer coming online).
 const connectAttempts = 5
 
+// stateNamespace/stateKey locate the app-state blob in the encrypted store.
+const (
+	stateNamespace = "app"
+	stateKey       = "state"
+)
+
 // Event is a runtime notification drained by Poll and surfaced in the UI.
 type Event struct {
 	Kind    string `json:"kind"` // message | file | presence | sent | sendFailed | receipt | error
@@ -164,6 +170,28 @@ func (r *Runtime) SendFile(peerURI, path, msgID string) {
 	case r.outbox <- outReq{peerURI: peerURI, filePath: path, msgID: msgID}:
 	case <-r.closeCh:
 	}
+}
+
+// SaveState persists an opaque app-state blob (contacts, chat history, profile)
+// into the encrypted-at-rest store, so it survives restarts. No-op without a
+// store. The app owns the JSON shape.
+func (r *Runtime) SaveState(jsonState string) error {
+	if r.node.Store == nil {
+		return nil
+	}
+	return r.node.Store.SaveBlob(stateNamespace, stateKey, []byte(jsonState))
+}
+
+// LoadState returns the previously saved app-state blob, or "" if none.
+func (r *Runtime) LoadState() string {
+	if r.node.Store == nil {
+		return ""
+	}
+	b, err := r.node.Store.LoadBlob(stateNamespace, stateKey)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 // Poll atomically drains and returns the pending events.

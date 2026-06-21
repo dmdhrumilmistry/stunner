@@ -92,6 +92,10 @@ class StunnerCore {
       _lib!.lookupFunction<_NoArgStrC, _NoArgStrDart>('StunnerStop');
   late final _OneStrDart _markRead =
       _lib!.lookupFunction<_OneStrC, _OneStrDart>('StunnerMarkRead');
+  late final _OneStrDart _saveState =
+      _lib!.lookupFunction<_OneStrC, _OneStrDart>('StunnerSaveState');
+  late final _NoArgStrDart _loadState =
+      _lib!.lookupFunction<_NoArgStrC, _NoArgStrDart>('StunnerLoadState');
   late final _FreeDart _free =
       _lib!.lookupFunction<_FreeC, _FreeDart>('StunnerFree');
 
@@ -319,6 +323,26 @@ class StunnerCore {
     } finally {
       malloc.free(a);
     }
+  }
+
+  /// Persists an opaque app-state JSON blob into the encrypted store.
+  void saveState(String json) {
+    if (!available) return;
+    final a = json.toNativeUtf8();
+    try {
+      _free(_saveState(a));
+    } finally {
+      malloc.free(a);
+    }
+  }
+
+  /// Loads the previously saved app-state JSON blob ("" if none).
+  String loadState() {
+    if (!available) return '';
+    final ptr = _loadState();
+    final s = ptr.toDartString();
+    _free(ptr);
+    return s;
   }
 
   /// Stops the runtime.

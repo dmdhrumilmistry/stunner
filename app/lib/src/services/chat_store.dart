@@ -31,6 +31,25 @@ class ChatStore extends ChangeNotifier {
   List<Contact> get contacts => List.unmodifiable(_contacts);
   List<Chat> get chats => List.unmodifiable(_chats);
 
+  /// Serializes contacts + conversations for encrypted persistence.
+  Map<String, dynamic> toMap() => {
+        'contacts': _contacts.map((c) => c.toMap()).toList(),
+        'chats': _chats.map((c) => c.toMap()).toList(),
+      };
+
+  /// Replaces all state from a previously serialized map (used on startup).
+  /// Does not notify — the caller restores the whole app then refreshes once.
+  void restoreFromMap(Map<String, dynamic> m) {
+    _contacts
+      ..clear()
+      ..addAll(((m['contacts'] as List?) ?? const [])
+          .map((e) => Contact.fromMap((e as Map).cast<String, dynamic>())));
+    _chats
+      ..clear()
+      ..addAll(((m['chats'] as List?) ?? const [])
+          .map((e) => Chat.fromMap((e as Map).cast<String, dynamic>())));
+  }
+
   Chat chatById(String id) => _chats.firstWhere((c) => c.id == id);
   Chat? maybeChat(String id) {
     for (final c in _chats) {

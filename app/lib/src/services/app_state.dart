@@ -36,6 +36,32 @@ class Prefs {
 
   bool reduceMotion = false;
   bool enterToSend = true;
+
+  Map<String, dynamic> toMap() => {
+        'readReceipts': readReceipts,
+        'typingIndicators': typingIndicators,
+        'onlineStatus': onlineStatus,
+        'lastSeen': lastSeen,
+        'notifSound': notifSound,
+        'notifPreview': notifPreview,
+        'notifReactions': notifReactions,
+        'notifGroup': notifGroup,
+        'reduceMotion': reduceMotion,
+        'enterToSend': enterToSend,
+      };
+
+  void restoreFromMap(Map<String, dynamic> m) {
+    readReceipts = m['readReceipts'] as bool? ?? readReceipts;
+    typingIndicators = m['typingIndicators'] as bool? ?? typingIndicators;
+    onlineStatus = m['onlineStatus'] as bool? ?? onlineStatus;
+    lastSeen = m['lastSeen'] as bool? ?? lastSeen;
+    notifSound = m['notifSound'] as bool? ?? notifSound;
+    notifPreview = m['notifPreview'] as bool? ?? notifPreview;
+    notifReactions = m['notifReactions'] as bool? ?? notifReactions;
+    notifGroup = m['notifGroup'] as bool? ?? notifGroup;
+    reduceMotion = m['reduceMotion'] as bool? ?? reduceMotion;
+    enterToSend = m['enterToSend'] as bool? ?? enterToSend;
+  }
 }
 
 /// App-wide state: theme mode, the local user's profile, and preferences.
@@ -53,6 +79,35 @@ class AppState extends ChangeNotifier {
   String myContactCode = '';
 
   ThemeMode get themeMode => _themeMode;
+
+  /// Serializes profile + prefs + onboarding for encrypted persistence.
+  Map<String, dynamic> toMap() => {
+        'onboarded': onboarded,
+        'myContactCode': myContactCode,
+        'themeMode': _themeMode.name,
+        'profile': {
+          'name': profile.name,
+          'username': profile.username,
+          'status': profile.status,
+          'email': profile.email,
+        },
+        'prefs': prefs.toMap(),
+      };
+
+  /// Restores from a previously serialized map. Does not notify.
+  void restoreFromMap(Map<String, dynamic> m) {
+    onboarded = m['onboarded'] as bool? ?? false;
+    myContactCode = m['myContactCode'] as String? ?? '';
+    _themeMode = ThemeMode.values.asNameMap()[m['themeMode']] ?? ThemeMode.system;
+    final p = (m['profile'] as Map?)?.cast<String, dynamic>() ?? const {};
+    profile
+      ..name = p['name'] as String? ?? ''
+      ..username = p['username'] as String? ?? ''
+      ..status = p['status'] as String? ?? ''
+      ..email = p['email'] as String? ?? '';
+    final pr = (m['prefs'] as Map?)?.cast<String, dynamic>();
+    if (pr != null) prefs.restoreFromMap(pr);
+  }
 
   /// Completes onboarding: stores the user-entered details and their contact
   /// code, then reveals the app.

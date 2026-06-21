@@ -55,6 +55,28 @@ func Send(peerURI, text, msgID string) {
 	}
 }
 
+// SaveState persists an opaque app-state blob into the encrypted store.
+func SaveState(jsonState string) error {
+	rtMu.Lock()
+	r := rt
+	rtMu.Unlock()
+	if r == nil {
+		return nil
+	}
+	return r.SaveState(jsonState)
+}
+
+// LoadState returns the previously saved app-state blob, or "" if none.
+func LoadState() string {
+	rtMu.Lock()
+	r := rt
+	rtMu.Unlock()
+	if r == nil {
+		return ""
+	}
+	return r.LoadState()
+}
+
 // SendFile enqueues the file at path to the peer identified by their contact URI.
 func SendFile(peerURI, path, msgID string) {
 	rtMu.Lock()

@@ -152,4 +152,34 @@ void main() {
     expect(m.fileName, 'photo.jpg');
     expect(m.fromMe, isFalse);
   });
+
+  test('App state + chat store serialize and restore (persistence)', () {
+    final store = ChatStore();
+    final c = store.addContact(name: 'Ada', code: 'stunner:contact?k=a', fingerprint: 'fp-a');
+    final chatId = store.startChatWith(c);
+    store.onSend = (u, t, m) {};
+    store.sendText(chatId, 'hello');
+    store.markSent(store.chatById(chatId).messages.single.id);
+
+    final appState = AppState();
+    appState.completeOnboarding(name: 'Ada', contactCode: 'stunner:contact?k=a');
+    appState.setThemeMode(ThemeMode.dark);
+
+    // Round-trip through the same JSON shape the runtime persists.
+    final blob = {'app': appState.toMap(), 'store': store.toMap()};
+
+    final store2 = ChatStore();
+    final app2 = AppState();
+    app2.restoreFromMap((blob['app'] as Map).cast<String, dynamic>());
+    store2.restoreFromMap((blob['store'] as Map).cast<String, dynamic>());
+
+    expect(app2.onboarded, isTrue);
+    expect(app2.profile.name, 'Ada');
+    expect(app2.themeMode, ThemeMode.dark);
+    expect(app2.myContactCode, 'stunner:contact?k=a');
+    expect(store2.contacts.single.name, 'Ada');
+    final m = store2.chatById(chatId).messages.single;
+    expect(m.text, 'hello');
+    expect(m.status, DeliveryStatus.sent);
+  });
 }

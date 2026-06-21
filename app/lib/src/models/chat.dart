@@ -41,6 +41,30 @@ class Contact {
   bool blocked;
 
   String get initials => initialsOf(name);
+
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'name': name,
+        'code': code,
+        'fingerprint': fingerprint,
+        'role': role,
+        'email': email,
+        'phone': phone,
+        'muted': muted,
+        'blocked': blocked,
+      };
+
+  factory Contact.fromMap(Map<String, dynamic> m) => Contact(
+        id: m['id'] as String? ?? '',
+        name: m['name'] as String? ?? '',
+        code: m['code'] as String? ?? '',
+        fingerprint: m['fingerprint'] as String? ?? '',
+        role: m['role'] as String? ?? '',
+        email: m['email'] as String? ?? '',
+        phone: m['phone'] as String? ?? '',
+        muted: m['muted'] as bool? ?? false,
+        blocked: m['blocked'] as bool? ?? false,
+      ); // online is live presence; restored as offline
 }
 
 class Message {
@@ -72,7 +96,31 @@ class Message {
 
   /// Emoji -> count. A simple in-session reaction model.
   final Map<String, int> reactions;
+
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'text': text,
+        'fromMe': fromMe,
+        'status': status.name,
+        'timeMs': time.millisecondsSinceEpoch,
+        if (fileName != null) 'fileName': fileName,
+        if (filePath != null) 'filePath': filePath,
+        if (reactions.isNotEmpty) 'reactions': reactions,
+      };
+
+  factory Message.fromMap(Map<String, dynamic> m) => Message(
+        id: m['id'] as String? ?? '',
+        text: m['text'] as String? ?? '',
+        fromMe: m['fromMe'] as bool? ?? false,
+        status: DeliveryStatus.values.asNameMap()[m['status']] ?? DeliveryStatus.sent,
+        time: DateTime.fromMillisecondsSinceEpoch(m['timeMs'] as int? ?? 0),
+        fileName: m['fileName'] as String?,
+        filePath: m['filePath'] as String?,
+        reactions: (m['reactions'] as Map?)
+            ?.map((k, v) => MapEntry(k as String, (v as num).toInt())),
+      );
 }
+
 
 class Chat {
   Chat({
@@ -90,4 +138,22 @@ class Chat {
   int unread;
 
   Message? get last => messages.isEmpty ? null : messages.last;
+
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'contactId': contactId,
+        'name': name,
+        'unread': unread,
+        'messages': messages.map((m) => m.toMap()).toList(),
+      };
+
+  factory Chat.fromMap(Map<String, dynamic> m) => Chat(
+        id: m['id'] as String? ?? '',
+        contactId: m['contactId'] as String? ?? '',
+        name: m['name'] as String? ?? '',
+        unread: m['unread'] as int? ?? 0,
+        messages: ((m['messages'] as List?) ?? const [])
+            .map((e) => Message.fromMap((e as Map).cast<String, dynamic>()))
+            .toList(),
+      );
 }
