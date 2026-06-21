@@ -166,6 +166,18 @@ func (r *Runtime) Send(peerURI, text, msgID string) {
 	}
 }
 
+// SendTyping sends an ephemeral typing indicator to the peer, but only if a
+// link is already established (best effort; never dials).
+func (r *Runtime) SendTyping(peerURI string) {
+	c, err := contact.ParseURI(peerURI)
+	if err != nil {
+		return
+	}
+	if link := r.getLink(identity.Fingerprint(c.IdentityKey)); link != nil {
+		_ = link.SendTyping(identity.Fingerprint(c.IdentityKey))
+	}
+}
+
 // SendFile enqueues the file at path to the peer identified by their contact
 // URI. Like Send it returns immediately and reports a "sent"/"sendFailed" event.
 func (r *Runtime) SendFile(peerURI, path, msgID string) {
@@ -407,6 +419,8 @@ func (r *Runtime) recvLoop(link *node.Link) {
 			r.push(Event{Kind: "file", PeerFP: fp, PeerURI: uri, MsgID: env.MsgID,
 				Name: offer.Name, Path: path, Detail: offer.MIME})
 			_ = link.SendReceipt(fp, env.MsgID, messaging.StateDelivered)
+		case messaging.TypeTyping:
+			r.push(Event{Kind: "typing", PeerFP: fp, PeerURI: uri})
 		case messaging.TypeReceipt:
 			if rb, rerr := env.Receipt(); rerr == nil {
 				r.push(Event{Kind: "receipt", PeerFP: fp, MsgID: rb.RefMsgID, Detail: string(rb.State)})

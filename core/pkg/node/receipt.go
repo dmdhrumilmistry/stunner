@@ -11,17 +11,7 @@ func (l *Link) SendReceipt(convID, refMsgID string, state messaging.DeliveryStat
 	if err != nil {
 		return err
 	}
-	pt, err := env.Encode()
-	if err != nil {
-		return err
-	}
-	ct, err := l.session.Encrypt(pt)
-	if err != nil {
-		return err
-	}
-	frame, err := messaging.EncodeFrame(messaging.Frame{Payload: ct})
-	if err != nil {
-		return err
-	}
-	return l.conn.Send(frame)
+	l.sendMu.Lock()
+	defer l.sendMu.Unlock()
+	return l.encryptSendLocked(env)
 }

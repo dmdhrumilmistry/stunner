@@ -55,6 +55,16 @@ func Send(peerURI, text, msgID string) {
 	}
 }
 
+// SendTyping sends an ephemeral typing indicator to the peer (best effort).
+func SendTyping(peerURI string) {
+	rtMu.Lock()
+	r := rt
+	rtMu.Unlock()
+	if r != nil {
+		r.SendTyping(peerURI)
+	}
+}
+
 // GetSettings returns current settings (STUN/TURN etc.) as JSON.
 func GetSettings() string {
 	rtMu.Lock()

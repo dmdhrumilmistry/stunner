@@ -92,6 +92,8 @@ class StunnerCore {
       _lib!.lookupFunction<_NoArgStrC, _NoArgStrDart>('StunnerStop');
   late final _OneStrDart _markRead =
       _lib!.lookupFunction<_OneStrC, _OneStrDart>('StunnerMarkRead');
+  late final _OneStrDart _sendTyping =
+      _lib!.lookupFunction<_OneStrC, _OneStrDart>('StunnerSendTyping');
   late final _OneStrDart _saveState =
       _lib!.lookupFunction<_OneStrC, _OneStrDart>('StunnerSaveState');
   late final _NoArgStrDart _loadState =
@@ -324,6 +326,17 @@ class StunnerCore {
     final a = peerUri.toNativeUtf8();
     try {
       _free(_markRead(a));
+    } finally {
+      malloc.free(a);
+    }
+  }
+
+  /// Sends an ephemeral typing indicator to [peerUri] (best effort).
+  void sendTyping(String peerUri) {
+    if (!available) return;
+    final a = peerUri.toNativeUtf8();
+    try {
+      _free(_sendTyping(a));
     } finally {
       malloc.free(a);
     }

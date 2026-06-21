@@ -97,6 +97,12 @@ func TestRuntimeBidirectional(t *testing.T) {
 	if got.PeerFP != bob.Fingerprint() {
 		t.Errorf("alice saw peer %q, want %q", got.PeerFP, bob.Fingerprint())
 	}
+
+	// Typing indicator over the established link.
+	alice.SendTyping(bob.MyURI())
+	if e := bc.wait(t, "bob typing", func(e Event) bool { return e.Kind == "typing" }); e.PeerFP != alice.Fingerprint() {
+		t.Errorf("typing peer = %q, want %q", e.PeerFP, alice.Fingerprint())
+	}
 }
 
 // TestRuntimeFileTransfer sends a file between two runtimes over real pion
