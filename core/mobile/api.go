@@ -55,6 +55,17 @@ func Send(peerURI, text, msgID string) {
 	}
 }
 
+// MarkRead sends a read receipt for the latest message from the peer (call when
+// the user opens the conversation).
+func MarkRead(peerURI string) {
+	rtMu.Lock()
+	r := rt
+	rtMu.Unlock()
+	if r != nil {
+		r.MarkRead(peerURI)
+	}
+}
+
 // Poll returns pending runtime events as a JSON array (empty "[]" if none).
 func Poll() string {
 	rtMu.Lock()

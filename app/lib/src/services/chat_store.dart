@@ -19,6 +19,9 @@ class ChatStore extends ChangeNotifier {
   /// When null (runtime not started) sends are marked failed.
   void Function(String peerUri, String text, String msgId)? onSend;
 
+  /// Hook wired by the runtime to send a read receipt for a peer's contact URI.
+  void Function(String peerUri)? onMarkRead;
+
   final List<Contact> _contacts = [];
   final List<Chat> _chats = [];
 
@@ -174,11 +177,43 @@ class ChatStore extends ChangeNotifier {
     }
   }
 
-  /// Marks an outgoing message (by id) as delivered/sent.
+  /// Marks an outgoing message (by id) as sent (queued to the peer).
   void markSent(String msgId) => _setStatus(msgId, DeliveryStatus.sent);
 
   /// Marks an outgoing message (by id) as failed.
   void markFailed(String msgId) => _setStatus(msgId, DeliveryStatus.failed);
+
+  /// Marks an outgoing message (by id) as delivered to the peer.
+  void markDelivered(String msgId) {
+    // Don't regress a message already marked read.
+    for (final c in _chats) {
+      for (final m in c.messages) {
+        if (m.id == msgId) {
+          if (m.status != DeliveryStatus.read) {
+            m.status = DeliveryStatus.delivered;
+            notifyListeners();
+          }
+          return;
+        }
+      }
+    }
+  }
+
+  /// Marks all of our sent messages in the peer's chat as read (read receipt).
+  void markReadByPeer(String peerFingerprint) {
+    for (final chat in _chats) {
+      if (chat.contactId != peerFingerprint) continue;
+      var changed = false;
+      for (final m in chat.messages) {
+        if (m.fromMe && m.status != DeliveryStatus.read) {
+          m.status = DeliveryStatus.read;
+          changed = true;
+        }
+      }
+      if (changed) notifyListeners();
+      return;
+    }
+  }
 
   void _setStatus(String msgId, DeliveryStatus status) {
     for (final c in _chats) {
@@ -232,10 +267,14 @@ class ChatStore extends ChangeNotifier {
 
   void markRead(String chatId) {
     final chat = maybeChat(chatId);
-    if (chat != null && chat.unread != 0) {
+    if (chat == null) return;
+    if (chat.unread != 0) {
       chat.unread = 0;
       notifyListeners();
     }
+    // Tell the peer we've read their messages (read receipt).
+    final c = contactForChat(chat);
+    if (c != null && c.code.isNotEmpty) onMarkRead?.call(c.code);
   }
 
   void _moveToTop(Chat chat) {

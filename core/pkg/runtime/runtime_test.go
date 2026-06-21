@@ -26,46 +26,71 @@ func newRuntime(t *testing.T, reg *signaling.Registry, handle string) *Runtime {
 	return StartWith(node.New(acc, nil), tr, sig, handle)
 }
 
-// waitEvent polls until an event of the given kind (and optional text) arrives,
-// returning it. Events not matched are accumulated so earlier ones aren't lost.
-func waitEvent(t *testing.T, r *Runtime, kind, text string) Event {
+// collector buffers drained events so matching one never discards the others
+// that arrived in the same Poll batch.
+type collector struct {
+	r   *Runtime
+	buf []Event
+}
+
+func (c *collector) wait(t *testing.T, desc string, pred func(Event) bool) Event {
 	t.Helper()
 	deadline := time.Now().Add(40 * time.Second)
 	for time.Now().Before(deadline) {
-		for _, e := range r.Poll() {
-			if e.Kind == kind && (text == "" || e.Text == text) {
+		c.buf = append(c.buf, c.r.Poll()...)
+		for i, e := range c.buf {
+			if pred(e) {
+				c.buf = append(c.buf[:i], c.buf[i+1:]...)
 				return e
 			}
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	t.Fatalf("timed out waiting for %q event (text=%q)", kind, text)
+	t.Fatalf("timed out waiting for %s", desc)
 	return Event{}
 }
 
 // TestRuntimeBidirectional runs two full runtimes over real pion WebRTC
-// (loopback) and an in-process signaler, and verifies messages flow both ways
-// with the expected events — exercising listen/connect/recv, the async send
-// worker, link reuse, and the event queue end to end (no networking).
+// (loopback) and an in-process signaler, verifying messages flow both ways with
+// the expected events plus delivered/read receipts — exercising listen/connect/
+// recv, the async send worker, link reuse, the receipt path, and the event queue
+// end to end (no networking).
 func TestRuntimeBidirectional(t *testing.T) {
 	reg := signaling.NewRegistry()
 	alice := newRuntime(t, reg, "alice")
 	bob := newRuntime(t, reg, "bob")
 	defer alice.Stop()
 	defer bob.Stop()
+	ac := &collector{r: alice}
+	bc := &collector{r: bob}
 
 	// Alice -> Bob (Alice connects, Bob accepts).
 	alice.Send(bob.MyURI(), "hello bob 🔒", "m1")
-	if got := waitEvent(t, bob, "message", "hello bob 🔒"); got.PeerFP != alice.Fingerprint() {
+	got := bc.wait(t, "bob message", func(e Event) bool { return e.Kind == "message" && e.Text == "hello bob 🔒" })
+	if got.PeerFP != alice.Fingerprint() {
 		t.Errorf("bob saw peer %q, want %q", got.PeerFP, alice.Fingerprint())
 	}
-	if sent := waitEvent(t, alice, "sent", ""); sent.MsgID != "m1" {
-		t.Errorf("alice sent msgId = %q, want m1", sent.MsgID)
+	if e := ac.wait(t, "alice sent", func(e Event) bool { return e.Kind == "sent" }); e.MsgID != "m1" {
+		t.Errorf("alice sent msgId = %q, want m1", e.MsgID)
+	}
+
+	// Bob auto-acks delivery; Alice sees a "delivered" receipt for m1.
+	if e := ac.wait(t, "delivered receipt",
+		func(e Event) bool { return e.Kind == "receipt" && e.Detail == "DELIVERED" }); e.MsgID != "m1" {
+		t.Errorf("delivered receipt msgId = %q, want m1", e.MsgID)
+	}
+
+	// Bob opens the conversation -> read receipt back to Alice.
+	bob.MarkRead(alice.MyURI())
+	if e := ac.wait(t, "read receipt",
+		func(e Event) bool { return e.Kind == "receipt" && e.Detail == "READ" }); e.MsgID != "m1" {
+		t.Errorf("read receipt msgId = %q, want m1", e.MsgID)
 	}
 
 	// Bob -> Alice over the established link (reverse direction).
 	bob.Send(alice.MyURI(), "hi alice 👋", "m2")
-	if got := waitEvent(t, alice, "message", "hi alice 👋"); got.PeerFP != bob.Fingerprint() {
+	got = ac.wait(t, "alice message", func(e Event) bool { return e.Kind == "message" && e.Text == "hi alice 👋" })
+	if got.PeerFP != bob.Fingerprint() {
 		t.Errorf("alice saw peer %q, want %q", got.PeerFP, bob.Fingerprint())
 	}
 }
@@ -75,9 +100,10 @@ func TestRuntimeSendInvalidURI(t *testing.T) {
 	reg := signaling.NewRegistry()
 	r := newRuntime(t, reg, "solo")
 	defer r.Stop()
+	c := &collector{r: r}
 
 	r.Send("not-a-stunner-uri", "x", "m9")
-	if e := waitEvent(t, r, "sendFailed", ""); e.MsgID != "m9" {
+	if e := c.wait(t, "sendFailed", func(e Event) bool { return e.Kind == "sendFailed" }); e.MsgID != "m9" {
 		t.Errorf("sendFailed msgId = %q, want m9", e.MsgID)
 	}
 }

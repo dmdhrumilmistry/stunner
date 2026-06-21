@@ -98,4 +98,30 @@ void main() {
     expect(store.contacts, isEmpty);
     expect(store.chats, isEmpty);
   });
+
+  test('Delivery + read receipts update status (read does not regress)', () {
+    final store = ChatStore();
+    store.onSend = (uri, text, msgId) {}; // keep it "sending"
+    final c = store.addContact(name: 'Ivy', code: 'stunner:contact?k=i', fingerprint: 'fp-ivy');
+    final chatId = store.startChatWith(c);
+    store.sendText(chatId, 'yo');
+    final id = store.chatById(chatId).messages.single.id;
+
+    store.markDelivered(id);
+    expect(store.chatById(chatId).messages.single.status, DeliveryStatus.delivered);
+    store.markReadByPeer('fp-ivy');
+    expect(store.chatById(chatId).messages.single.status, DeliveryStatus.read);
+    store.markDelivered(id); // must not regress read -> delivered
+    expect(store.chatById(chatId).messages.single.status, DeliveryStatus.read);
+  });
+
+  test('Opening a chat triggers a read-receipt callback', () {
+    final store = ChatStore();
+    String? readUri;
+    store.onMarkRead = (uri) => readUri = uri;
+    final c = store.addContact(name: 'Jo', code: 'stunner:contact?k=j', fingerprint: 'fp-jo');
+    final chatId = store.startChatWith(c);
+    store.markRead(chatId);
+    expect(readUri, 'stunner:contact?k=j');
+  });
 }
