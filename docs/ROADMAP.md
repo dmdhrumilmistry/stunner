@@ -72,7 +72,13 @@ git tag v0.3.0 && git push origin v0.3.0
   binding.
 - Production: `go.mau.fi/libsignal` backend (`pkg/crypto/libsignal`) implementing
   the same `crypto.Session` interface ✅ — recommended for production pending an
-  audit of the from-scratch path.
+  audit of the from-scratch path. A wire-ready `Store` + bundle (de)serialization
+  now exist and are tested (full handshake from a serialized bundle, bidirectional,
+  out-of-order); gated by `STUNNER_CRYPTO_LIBSIGNAL` (`libsignal.Enabled()`).
+  Adopting it as the live `pkg/node` default still requires (a) binding the
+  libsignal identity to the account's Ed25519 identity so fingerprints/safety
+  numbers stay stable, and (b) switching node's two-phase bundle→handshake
+  exchange to libsignal's first-message (`PreKeySignalMessage`) model.
 
 ## Phase 4 — Transport & signaling ✅
 
