@@ -41,6 +41,8 @@ type DHTSignaler struct {
 
 	sdpIn  chan []byte
 	candIn chan []byte
+	breqIn chan []byte // inbound bundle requests (we are the responder)
+	brspIn chan []byte // inbound bundle responses (we are the requester)
 }
 
 // NewDHT creates a libp2p host (listening on listenAddrs, or an ephemeral
@@ -79,6 +81,8 @@ func NewDHT(ctx context.Context, listenAddrs ...string) (*DHTSignaler, error) {
 		disc:   drouting.NewRoutingDiscovery(kad),
 		sdpIn:  make(chan []byte, 8),
 		candIn: make(chan []byte, 8),
+		breqIn: make(chan []byte, 8),
+		brspIn: make(chan []byte, 8),
 	}
 	h.SetStreamHandler(signalProtocol, s.onStream)
 	return s, nil
@@ -148,6 +152,36 @@ func (s *DHTSignaler) RecvCandidate(string) ([]byte, error) {
 	}
 }
 
+// LocalID returns this node's libp2p peer ID (alias of ID, satisfying
+// BundleExchanger).
+func (s *DHTSignaler) LocalID() string { return s.host.ID().String() }
+
+func (s *DHTSignaler) SendBundleRequest(peerID string, req []byte) error {
+	return s.sendStream(peerID, 'q', req)
+}
+
+func (s *DHTSignaler) RecvBundleRequest() ([]byte, error) {
+	select {
+	case b := <-s.breqIn:
+		return b, nil
+	case <-s.ctx.Done():
+		return nil, s.ctx.Err()
+	}
+}
+
+func (s *DHTSignaler) SendBundleResponse(peerID string, bundle []byte) error {
+	return s.sendStream(peerID, 'b', bundle)
+}
+
+func (s *DHTSignaler) RecvBundleResponse() ([]byte, error) {
+	select {
+	case b := <-s.brspIn:
+		return b, nil
+	case <-s.ctx.Done():
+		return nil, s.ctx.Err()
+	}
+}
+
 func (s *DHTSignaler) Presence(peerID string) (bool, error) {
 	pid, err := peer.Decode(peerID)
 	if err != nil {
@@ -208,6 +242,16 @@ func (s *DHTSignaler) onStream(stream network.Stream) {
 	case 'c':
 		select {
 		case s.candIn <- data:
+		case <-s.ctx.Done():
+		}
+	case 'q':
+		select {
+		case s.breqIn <- data:
+		case <-s.ctx.Done():
+		}
+	case 'b':
+		select {
+		case s.brspIn <- data:
 		case <-s.ctx.Done():
 		}
 	}

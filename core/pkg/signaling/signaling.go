@@ -43,3 +43,25 @@ type Signaler interface {
 	// Close shuts down the signaler.
 	Close() error
 }
+
+// BundleExchanger exchanges X3DH prekey bundles out of band, before the WebRTC
+// data channel is opened. The contact URI a peer scans carries only the Ed25519
+// identity key (see pkg/contact.URI), not the signed/one-time prekeys the X3DH
+// initiator needs, so the dialer requests the answerer's bundle here first.
+//
+// Request and response use distinct channels so a node can answer an inbound
+// request (as responder) while awaiting its own response (as requester) without
+// the two crossing. It is a separate interface from Signaler because only the
+// runtime (pkg/session), not the transport, needs it; both DHTSignaler and the
+// in-memory signaler implement it.
+type BundleExchanger interface {
+	// LocalID returns this node's signaling peer ID (the value a peer replies
+	// to). It is embedded in a bundle request so the responder knows where to
+	// send the bundle.
+	LocalID() string
+
+	SendBundleRequest(peerID string, req []byte) error
+	RecvBundleRequest() ([]byte, error)
+	SendBundleResponse(peerID string, bundle []byte) error
+	RecvBundleResponse() ([]byte, error)
+}
